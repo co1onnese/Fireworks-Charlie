@@ -1,0 +1,393 @@
+"""
+Data collection orchestrator for Trainer-Charlie
+Wraps Charlie-T1-DB data collection functionality
+"""
+import os
+import logging
+from datetime import datetime, date, timedelta
+from typing import List, Dict, Any
+
+from .database_manager import DatabaseManager
+from .data_processor import DataProcessor
+from .eodhd_client import EODHDClient
+from .fred_client import FREDClient
+from .feature_engineering import FeatureEngineer
+
+logger = logging.getLogger(__name__)
+
+class DataOrchestrator:
+    """Orchestrates data collection using Charlie-T1-DB modules"""
+    
+    def __init__(self, config):
+        """
+        Initialize data orchestrator
+        
+        Args:
+            config: Configuration object with API keys and settings
+        """
+        self.config = config
+        
+        # Initialize components
+        self.db_manager = DatabaseManager(config.DB_URL)
+        self.eodhd_client = EODHDClient(config.EODHD_API_KEY) if config.EODHD_API_KEY else None
+        self.fred_client = FREDClient(config.FRED_API_KEY) if config.FRED_API_KEY else None
+        
+        # FRED series to fetch (from Charlie-T1-DB)
+        self.fred_series = [
+            "GDPC1",       # Real GDP
+            "CPIAUCSL",    # CPI
+            "PCEPI",       # PCE
+            "UNRATE",      # Unemployment Rate
+            "FEDFUNDS",    # Fed Funds Rate
+            "DGS10",       # 10-Year Treasury
+            "DGS2",        # 2-Year Treasury
+            "INDPRO",      # Industrial Production
+        ]
+        
+        logger.info("DataOrchestrator initialized")
+    
+    def collect_data_for_ticker(self, ticker: str, start_date: date, end_date: date) -> Dict[str, Any]:
+        """
+        Collect all data for a single ticker over a date range
+        
+        Args:
+            ticker: Stock ticker symbol
+            start_date: Start date for data collection
+            end_date: End date for data collection
+            
+        Returns:
+            Dictionary with collected data status
+        """
+        logger.info(f"Collecting data for {ticker} from {start_date} to {end_date}")
+        
+        session = self.db_manager.get_session()
+        processor = DataProcessor([ticker], start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+        
+        try:
+            # 1. Fetch and store ticker metadata
+            if self.eodhd_client:
+                fundamentals_raw = self.eodhd_client.get_fundamentals(f"{ticker}.US")
+                if fundamentals_raw:
+                    company_name = fundamentals_raw.get("General", {}).get("Name")
+                    sector = fundamentals_raw.get("General", {}).get("Sector")
+                    industry = fundamentals_raw.get("General", {}).get("Industry")
+                else:
+                    company_name, sector, industry = ticker, None, None
+            else:
+                company_name, sector, industry = ticker, None, None
+            
+            ticker_obj = self.db_manager.insert_ticker(
+                session,
+                symbol=ticker,
+                exchange="US",
+                company_name=company_name,
+                sector=sector,
+                industry=industry,
+            )
+            session.commit()
+            logger.info(f"Ticker {ticker} metadata stored")
+            
+            # 2. Fetch and process Technical Market Data
+            if self.eodhd_client:
+                eod_raw = self.eodhd_client.get_eod_data(
+                    f"{ticker}.US", 
+                    start_date.strftime("%Y-%m-%d"), 
+                    end_date.strftime("%Y-%m-%d")
+                )
+                eod_processed = processor.process_eod_data(eod_raw, f"{ticker}.US")
+                
+                # Add symbol to each record for the insert method
+                for record in eod_processed:
+                    record["symbol"] = ticker
+                self.db_manager.insert_technical_market_data(session, eod_processed)
+                session.commit()
+                logger.info(f"Stored {len(eod_processed)} technical market records")
+            
+            # 3. Fetch and process Fundamentals
+            if self.eodhd_client and fundamentals_raw:
+                fundamentals_processed = processor.process_fundamentals(
+                    fundamentals_raw, 
+                    f"{ticker}.US"
+                )
+                if fundamentals_processed:
+                    self.db_manager.insert_fundamentals(session, fundamentals_processed)
+                    session.commit()
+                    logger.info("Fundamentals data stored")
+            
+            # 4. Fetch and process News
+            if self.eodhd_client:
+                news_raw = self.eodhd_client.get_news(
+                    f"{ticker}.US", 
+                    start_date.strftime("%Y-%m-%d"), 
+                    end_date.strftime("%Y-%m-%d")
+                )
+                news_processed = processor.process_news(news_raw, f"{ticker}.US")
+                
+                # Add symbol to each article for the insert method
+                for article in news_processed:
+                    article["symbol"] = ticker
+                self.db_manager.insert_news(session, news_processed)
+                session.commit()
+                logger.info(f"Stored {len(news_processed)} news articles")
+            
+            # 5. Fetch and process Insider Transactions
+            if self.eodhd_client:
+                insider_raw = self.eodhd_client.get_insider_transactions(
+                    f"{ticker}.US", 
+                    start_date.strftime("%Y-%m-%d"), 
+                    end_date.strftime("%Y-%m-%d")
+                )
+                insider_processed = processor.process_insider_transactions(insider_raw, f"{ticker}.US")
+                
+                # Add symbol to each transaction for the insert method
+                for transaction in insider_processed:
+                    transaction["symbol"] = ticker
+                self.db_manager.insert_insider_transactions(session, insider_processed)
+                session.commit()
+                logger.info(f"Stored {len(insider_processed)} insider transactions")
+            
+            return {
+                "status": "success",
+                "ticker": ticker,
+                "ticker_id": ticker_obj.ticker_id,
+                "records": {
+                    "technical": len(eod_processed) if self.eodhd_client else 0,
+                    "news": len(news_processed) if self.eodhd_client else 0,
+                    "insider": len(insider_processed) if self.eodhd_client else 0,
+                }
+            }
+            
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error collecting data for {ticker}: {e}")
+            return {
+                "status": "error",
+                "ticker": ticker,
+                "error": str(e)
+            }
+        finally:
+            session.close()
+    
+    def collect_macro_data(self, start_date: date, end_date: date) -> Dict[str, Any]:
+        """
+        Collect macroeconomic data from FRED
+        
+        Args:
+            start_date: Start date for data collection
+            end_date: End date for data collection
+            
+        Returns:
+            Dictionary with macro data collection status
+        """
+        if not self.fred_client:
+            logger.warning("FRED client not available, skipping macro data")
+            return {"status": "skipped", "reason": "No FRED API key"}
+        
+        logger.info(f"Collecting macro data from {start_date} to {end_date}")
+        
+        session = self.db_manager.get_session()
+        processor = DataProcessor([], start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+        
+        try:
+            total_records = 0
+            
+            for series_id in self.fred_series:
+                logger.info(f"Fetching FRED series: {series_id}")
+                
+                # Get series metadata
+                series_info = self.fred_client.get_series_info(series_id)
+                if not series_info:
+                    logger.warning(f"Could not fetch info for series {series_id}")
+                    continue
+                
+                # Get series observations
+                observations = self.fred_client.get_series_observations(
+                    series_id,
+                    start_date.strftime("%Y-%m-%d"),
+                    end_date.strftime("%Y-%m-%d")
+                )
+                
+                if observations:
+                    # Process and store
+                    processed = processor.process_fred_series(
+                        observations,
+                        series_info,
+                        series_id
+                    )
+
+                    self.db_manager.insert_macroeconomic_indicators(session, processed)
+
+                    session.commit()
+                    total_records += len(processed)
+                    logger.info(f"Stored {len(processed)} records for {series_id}")
+            
+            return {
+                "status": "success",
+                "total_records": total_records,
+                "series_count": len(self.fred_series)
+            }
+            
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error collecting macro data: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+        finally:
+            session.close()
+    
+    def run_feature_engineering(self, tickers: List[str], start_date: date, end_date: date) -> Dict[str, Any]:
+        """
+        Run feature engineering for specified tickers
+        
+        Args:
+            tickers: List of ticker symbols
+            start_date: Start date
+            end_date: End date
+            
+        Returns:
+            Dictionary with feature engineering status
+        """
+        logger.info(f"Running feature engineering for {len(tickers)} tickers")
+        
+        feature_engineer = FeatureEngineer(
+            self.db_manager,
+            max_workers=self.config.PARALLEL_WORKERS
+        )
+        
+        try:
+            feature_engineer.process_all_features(
+                tickers,
+                start_date.strftime("%Y-%m-%d"),
+                end_date.strftime("%Y-%m-%d")
+            )
+            return {
+                "status": "success",
+                "tickers_processed": len(tickers)
+            }
+        except Exception as e:
+            logger.error(f"Error in feature engineering: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+    
+    def get_data_for_date(self, ticker: str, as_of_date: date) -> Dict[str, Any]:
+        """
+        Get all available data for a ticker as of a specific date
+        
+        Args:
+            ticker: Stock ticker symbol
+            as_of_date: Date to get data for
+            
+        Returns:
+            Dictionary with all available data
+        """
+        session = self.db_manager.get_session()
+        
+        try:
+            # Get ticker ID
+            from .database_manager import Ticker
+            ticker_obj = session.query(Ticker).filter_by(
+                symbol=ticker
+            ).first()
+            
+            if not ticker_obj:
+                return {"error": f"Ticker {ticker} not found"}
+            
+            # Get technical data
+            from .database_manager import TechnicalMarketData
+            technical_data = session.query(TechnicalMarketData).filter(
+                TechnicalMarketData.ticker_id == ticker_obj.ticker_id,
+                TechnicalMarketData.date <= as_of_date
+            ).order_by(
+                TechnicalMarketData.date.desc()
+            ).limit(15).all()  # Get last 15 days
+            
+            # Get latest fundamentals
+            from .database_manager import Fundamental, News, MacroFeatures
+            fundamentals = session.query(Fundamental).filter(
+                Fundamental.ticker_id == ticker_obj.ticker_id,
+                Fundamental.filing_date <= as_of_date
+            ).order_by(
+                Fundamental.filing_date.desc()
+            ).first()
+            
+            # Get news
+            # Convert as_of_date to datetime for comparison with published_date
+            as_of_datetime = datetime.combine(as_of_date, datetime.min.time()) if isinstance(as_of_date, date) and not isinstance(as_of_date, datetime) else as_of_date
+            news = session.query(News).filter(
+                News.ticker_id == ticker_obj.ticker_id,
+                News.published_date <= as_of_datetime,
+                News.published_date >= as_of_datetime - timedelta(days=30)
+            ).order_by(
+                News.published_date.desc()
+            ).all()
+            
+            # Get macro features
+            macro_features = session.query(MacroFeatures).filter(
+                MacroFeatures.date <= as_of_date
+            ).order_by(
+                MacroFeatures.date.desc()
+            ).first()
+            
+            return {
+                "ticker": ticker,
+                "date": as_of_date,
+                "technical": [self._serialize_technical(t) for t in technical_data],
+                "fundamentals": self._serialize_fundamentals(fundamentals) if fundamentals else None,
+                "news": [self._serialize_news(n) for n in news],
+                "macro_features": self._serialize_macro_features(macro_features) if macro_features else None,
+            }
+            
+        finally:
+            session.close()
+    
+    def _serialize_technical(self, technical) -> Dict[str, Any]:
+        """Serialize technical data record"""
+        return {
+            "date": technical.date,
+            "open": float(technical.open),
+            "high": float(technical.high),
+            "low": float(technical.low),
+            "close": float(technical.close),
+            "volume": technical.volume,
+            "sma_20": float(technical.sma_20) if technical.sma_20 else None,
+            "ema_20": float(technical.ema_20) if technical.ema_20 else None,
+            "rsi_14": float(technical.rsi_14) if technical.rsi_14 else None,
+        }
+    
+    def _serialize_fundamentals(self, fundamentals) -> Dict[str, Any]:
+        """Serialize fundamentals record"""
+        return {
+            "report_date": fundamentals.report_date,
+            "filing_date": fundamentals.filing_date,
+            "market_cap": fundamentals.market_cap,
+            "pe_ratio": float(fundamentals.pe_ratio) if fundamentals.pe_ratio else None,
+            "eps": float(fundamentals.eps) if fundamentals.eps else None,
+            "revenue": fundamentals.revenue,
+            "net_income": fundamentals.net_income,
+            "revenue_qoq_change": float(fundamentals.revenue_qoq_change) if fundamentals.revenue_qoq_change else None,
+            "revenue_yoy_change": float(fundamentals.revenue_yoy_change) if fundamentals.revenue_yoy_change else None,
+        }
+    
+    def _serialize_news(self, news) -> Dict[str, Any]:
+        """Serialize news record"""
+        return {
+            "published_at": news.published_date,
+            "headline": news.title,
+            "summary": news.content,
+            "sentiment_score": float(news.sentiment_score) if news.sentiment_score else None,
+            "sentiment_label": news.sentiment_label if hasattr(news, 'sentiment_label') else news.sentiment,
+        }
+    
+    def _serialize_macro_features(self, macro) -> Dict[str, Any]:
+        """Serialize macro features record"""
+        return {
+            "date": macro.date,
+            "yield_curve_spread": float(macro.yield_curve_spread) if macro.yield_curve_spread else None,
+            "cpi_monthly_change": float(macro.cpi_monthly_change) if macro.cpi_monthly_change else None,
+            "gdp_quarterly_change": float(macro.gdp_quarterly_change) if macro.gdp_quarterly_change else None,
+            "unemployment_rate_change": float(macro.unemployment_rate_change) if macro.unemployment_rate_change else None,
+        }
