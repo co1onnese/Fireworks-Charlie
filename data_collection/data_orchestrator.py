@@ -1,6 +1,6 @@
 """
-Data collection orchestrator for Trainer-Charlie
-Wraps Charlie-T1-DB data collection functionality
+Data collection orchestrator for Fireworks-Charlie
+Wraps data collection functionality for RLVR training
 """
 import os
 import logging
@@ -16,7 +16,7 @@ from .feature_engineering import FeatureEngineer
 logger = logging.getLogger(__name__)
 
 class DataOrchestrator:
-    """Orchestrates data collection using Charlie-T1-DB modules"""
+    """Orchestrates data collection for RLVR training"""
     
     def __init__(self, config):
         """
@@ -32,7 +32,7 @@ class DataOrchestrator:
         self.eodhd_client = EODHDClient(config.EODHD_API_KEY) if config.EODHD_API_KEY else None
         self.fred_client = FREDClient(config.FRED_API_KEY) if config.FRED_API_KEY else None
         
-        # FRED series to fetch (from Charlie-T1-DB)
+        # FRED series to fetch
         self.fred_series = [
             "GDPC1",       # Real GDP
             "CPIAUCSL",    # CPI
@@ -96,9 +96,9 @@ class DataOrchestrator:
                 )
                 eod_processed = processor.process_eod_data(eod_raw, f"{ticker}.US")
                 
-                # Add symbol to each record for the insert method
+                # Add ticker_id to each record for the insert method
                 for record in eod_processed:
-                    record["symbol"] = ticker
+                    record["ticker_id"] = ticker_obj.ticker_id
                 self.db_manager.insert_technical_market_data(session, eod_processed)
                 session.commit()
                 logger.info(f"Stored {len(eod_processed)} technical market records")
@@ -110,6 +110,9 @@ class DataOrchestrator:
                     f"{ticker}.US"
                 )
                 if fundamentals_processed:
+                    # Add ticker_id to each record
+                    for record in fundamentals_processed:
+                        record["ticker_id"] = ticker_obj.ticker_id
                     self.db_manager.insert_fundamentals(session, fundamentals_processed)
                     session.commit()
                     logger.info("Fundamentals data stored")
@@ -123,9 +126,9 @@ class DataOrchestrator:
                 )
                 news_processed = processor.process_news(news_raw, f"{ticker}.US")
                 
-                # Add symbol to each article for the insert method
+                # Add ticker_id to each article for the insert method
                 for article in news_processed:
-                    article["symbol"] = ticker
+                    article["ticker_id"] = ticker_obj.ticker_id
                 self.db_manager.insert_news(session, news_processed)
                 session.commit()
                 logger.info(f"Stored {len(news_processed)} news articles")
@@ -139,10 +142,10 @@ class DataOrchestrator:
                 )
                 insider_processed = processor.process_insider_transactions(insider_raw, f"{ticker}.US")
                 
-                # Add symbol to each transaction for the insert method
+                # Add ticker_id to each transaction for the insert method
                 for transaction in insider_processed:
-                    transaction["symbol"] = ticker
-                self.db_manager.insert_insider_transactions(session, insider_processed)
+                    transaction["ticker_id"] = ticker_obj.ticker_id
+                self.db_manager.insert_insider_transactions_batch(session, insider_processed)
                 session.commit()
                 logger.info(f"Stored {len(insider_processed)} insider transactions")
             
@@ -296,14 +299,14 @@ class DataOrchestrator:
             if not ticker_obj:
                 return {"error": f"Ticker {ticker} not found"}
             
-            # Get technical data
-            from .database_manager import TechnicalMarketData
-            technical_data = session.query(TechnicalMarketData).filter(
-                TechnicalMarketData.ticker_id == ticker_obj.ticker_id,
-                TechnicalMarketData.date <= as_of_date
+            # Get technical data (expanded from 15 to 90 days)
+            from .database_manager import MarketData
+            technical_data = session.query(MarketData).filter(
+                MarketData.ticker_id == ticker_obj.ticker_id,
+                MarketData.date <= as_of_date
             ).order_by(
-                TechnicalMarketData.date.desc()
-            ).limit(15).all()  # Get last 15 days
+                MarketData.date.desc()
+            ).limit(90).all()  # Get last 90 days
             
             # Get latest fundamentals
             from .database_manager import Fundamental, News, MacroFeatures
@@ -319,18 +322,28 @@ class DataOrchestrator:
             as_of_datetime = datetime.combine(as_of_date, datetime.min.time()) if isinstance(as_of_date, date) and not isinstance(as_of_date, datetime) else as_of_date
             news = session.query(News).filter(
                 News.ticker_id == ticker_obj.ticker_id,
-                News.published_date <= as_of_datetime,
-                News.published_date >= as_of_datetime - timedelta(days=30)
+                News.published_at <= as_of_datetime,
+                News.published_at >= as_of_datetime - timedelta(days=60)
             ).order_by(
-                News.published_date.desc()
+                News.published_at.desc()
             ).all()
             
             # Get macro features
-            macro_features = session.query(MacroFeatures).filter(
-                MacroFeatures.date <= as_of_date
+            from .database_manager import MacroFeature
+            macro_features = session.query(MacroFeature).filter(
+                MacroFeature.date <= as_of_date
             ).order_by(
-                MacroFeatures.date.desc()
+                MacroFeature.date.desc()
             ).first()
+            
+            # Get insider transactions (last 90 days)
+            from .database_manager import InsiderTransaction
+            insider_transactions = session.query(InsiderTransaction).filter(
+                InsiderTransaction.ticker_id == ticker_obj.ticker_id,
+                InsiderTransaction.transaction_date <= as_of_date
+            ).order_by(
+                InsiderTransaction.transaction_date.desc()
+            ).limit(20).all()
             
             return {
                 "ticker": ticker,
@@ -339,23 +352,31 @@ class DataOrchestrator:
                 "fundamentals": self._serialize_fundamentals(fundamentals) if fundamentals else None,
                 "news": [self._serialize_news(n) for n in news],
                 "macro_features": self._serialize_macro_features(macro_features) if macro_features else None,
+                "insider_transactions": [self._serialize_insider_transaction(t) for t in insider_transactions],
             }
             
         finally:
             session.close()
     
     def _serialize_technical(self, technical) -> Dict[str, Any]:
-        """Serialize technical data record"""
+        """Serialize technical data record with all available indicators"""
         return {
             "date": technical.date,
             "open": float(technical.open),
             "high": float(technical.high),
             "low": float(technical.low),
             "close": float(technical.close),
+            "adjusted_close": float(technical.adjusted_close) if technical.adjusted_close else None,
             "volume": technical.volume,
+            # Technical Indicators
             "sma_20": float(technical.sma_20) if technical.sma_20 else None,
+            "sma_50": float(technical.sma_50) if technical.sma_50 else None,
             "ema_20": float(technical.ema_20) if technical.ema_20 else None,
             "rsi_14": float(technical.rsi_14) if technical.rsi_14 else None,
+            "macd": float(technical.macd) if technical.macd else None,
+            "macd_signal": float(technical.macd_signal) if technical.macd_signal else None,
+            "bollinger_upper": float(technical.bollinger_upper) if technical.bollinger_upper else None,
+            "bollinger_lower": float(technical.bollinger_lower) if technical.bollinger_lower else None,
         }
     
     def _serialize_fundamentals(self, fundamentals) -> Dict[str, Any]:
@@ -368,6 +389,12 @@ class DataOrchestrator:
             "eps": float(fundamentals.eps) if fundamentals.eps else None,
             "revenue": fundamentals.revenue,
             "net_income": fundamentals.net_income,
+            "operating_income": fundamentals.operating_income,
+            "total_assets": fundamentals.total_assets,
+            "total_liabilities": fundamentals.total_liabilities,
+            "stockholder_equity": fundamentals.stockholder_equity,
+            "total_debt": fundamentals.total_debt,
+            "cash_and_equivalents": fundamentals.cash_and_equivalents,
             "revenue_qoq_change": float(fundamentals.revenue_qoq_change) if fundamentals.revenue_qoq_change else None,
             "revenue_yoy_change": float(fundamentals.revenue_yoy_change) if fundamentals.revenue_yoy_change else None,
         }
@@ -375,8 +402,8 @@ class DataOrchestrator:
     def _serialize_news(self, news) -> Dict[str, Any]:
         """Serialize news record"""
         return {
-            "published_at": news.published_date,
-            "headline": news.title,
+            "published_at": news.published_at,
+            "headline": news.headline,
             "summary": news.content,
             "sentiment_score": float(news.sentiment_score) if news.sentiment_score else None,
             "sentiment_label": news.sentiment_label if hasattr(news, 'sentiment_label') else news.sentiment,
@@ -386,8 +413,20 @@ class DataOrchestrator:
         """Serialize macro features record"""
         return {
             "date": macro.date,
-            "yield_curve_spread": float(macro.yield_curve_spread) if macro.yield_curve_spread else None,
-            "cpi_monthly_change": float(macro.cpi_monthly_change) if macro.cpi_monthly_change else None,
-            "gdp_quarterly_change": float(macro.gdp_quarterly_change) if macro.gdp_quarterly_change else None,
+            "yield_curve_10y_2y": float(macro.yield_curve_10y_2y) if macro.yield_curve_10y_2y else None,
+            "cpi_monthly_pct": float(macro.cpi_monthly_pct) if macro.cpi_monthly_pct else None,
+            "gdp_qoq_pct": float(macro.gdp_qoq_pct) if macro.gdp_qoq_pct else None,
             "unemployment_rate_change": float(macro.unemployment_rate_change) if macro.unemployment_rate_change else None,
+        }
+    
+    def _serialize_insider_transaction(self, insider) -> Dict[str, Any]:
+        """Serialize insider transaction record"""
+        return {
+            "transaction_date": insider.transaction_date,
+            "owner_name": insider.owner_name,
+            "transaction_code": insider.transaction_code,
+            "shares": insider.shares,
+            "price": float(insider.price) if insider.price else None,
+            "amount": float(insider.amount) if insider.amount else None,
+            "shares_owned_after": insider.shares_owned_after,
         }

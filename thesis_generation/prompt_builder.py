@@ -378,3 +378,87 @@ Choose exactly ONE: strong_buy | buy | hold | sell | strong_sell
 <support>
 List 3-5 specific data points from the analysis that most strongly support your recommendation. Reference actual numbers, dates, and trends from the data provided.
 </support>"""
+    
+    def build_cumulative_prompt_messages(self, 
+                                       ticker: str, 
+                                       data_up_to_date: List[Dict[str, Any]],
+                                       response_format: str = "json") -> tuple[str, str]:
+        """
+        Build cumulative prompt messages for RLVR training datasets
+        
+        Args:
+            ticker: Stock ticker symbol
+            data_up_to_date: List of daily data dictionaries in chronological order
+            response_format: Response format ("json" or "xml")
+            
+        Returns:
+            Tuple of (system_prompt, user_prompt) for RLVR training
+        """
+        if not data_up_to_date:
+            raise ValueError("No data provided for prompt building")
+        
+        # Deduplicate the data
+        deduped_data = self.deduplicator.deduplicate_cumulative_data(ticker, data_up_to_date)
+        
+        # Build system prompt (instructions)
+        system_prompt = self._build_rlvr_system_prompt(response_format)
+        
+        # Build user prompt (data + analysis request)
+        user_prompt_parts = []
+        
+        # Header
+        user_prompt_parts.append(f"=== COMPREHENSIVE INVESTMENT ANALYSIS FOR {ticker} ===")
+        user_prompt_parts.append(f"\\nDate: {data_up_to_date[-1]['date']}")
+        user_prompt_parts.append(f"\\nPlease analyze {ticker} stock and provide your investment recommendation with detailed reasoning.")
+        
+        # Data sections
+        user_prompt_parts.append(self._build_technical_section(ticker, deduped_data))
+        user_prompt_parts.append(self._build_fundamentals_section(ticker, deduped_data))
+        user_prompt_parts.append(self._build_news_section(ticker, deduped_data))
+        user_prompt_parts.append(self._build_macro_section(deduped_data))
+        
+        # Insider transactions (if available)
+        insider_section = self._build_insider_section(ticker, deduped_data)
+        if insider_section:
+            user_prompt_parts.append(insider_section)
+        
+        # Analysis request
+        user_prompt_parts.append("\\nConsider:")
+        user_prompt_parts.append("- Technical indicators and price trends")
+        user_prompt_parts.append("- Company fundamentals and financial health")
+        user_prompt_parts.append("- Market conditions and economic factors")
+        user_prompt_parts.append("- Risk assessment and potential returns")
+        user_prompt_parts.append("\\nProvide your recommendation as JSON with reasoning, action, and supporting evidence.")
+        
+        user_prompt = "\\n".join(user_prompt_parts)
+        
+        return system_prompt, user_prompt
+    
+    def _build_rlvr_system_prompt(self, response_format: str = "json") -> str:
+        """Build system prompt for RLVR training"""
+        if response_format.lower() == "json":
+            return """You are a senior financial analyst with expertise in stock market analysis. Provide investment recommendations based on comprehensive analysis of market data, company fundamentals, and economic indicators.
+
+Your response MUST be valid JSON in this exact format:
+{
+  "reasoning": "Comprehensive analysis with specific data points and trends...",
+  "action": "buy",  // one of: strong_buy, buy, hold, sell, strong_sell
+  "support": "Key supporting evidence with specific metrics and data points..."
+}"""
+        else:
+            # XML format for backward compatibility
+            return """You are a senior financial analyst with expertise in stock market analysis. Provide investment recommendations based on comprehensive analysis of market data, company fundamentals, and economic indicators.
+
+Generate your thesis in the following XML format:
+
+<reasoning>
+Provide a comprehensive analysis that references specific data points from the technical, fundamental, news, and macro sections above. Explain how these factors combine to support your investment recommendation.
+</reasoning>
+
+<action>
+Choose exactly ONE: strong_buy | buy | hold | sell | strong_sell
+</action>
+
+<support>
+List 3-5 specific data points from the analysis that most strongly support your recommendation. Reference actual numbers, dates, and trends from the data provided.
+</support>"""

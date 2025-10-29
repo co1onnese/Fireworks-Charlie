@@ -1,10 +1,10 @@
 #!/bin/bash
-# Verify Trainer-Charlie setup
+# Verify Fireworks-Charlie setup
 
 set -e
 
 echo "================================================"
-echo "Trainer-Charlie Setup Verification"
+echo "Fireworks-Charlie Setup Verification"
 echo "================================================"
 
 # Check Python

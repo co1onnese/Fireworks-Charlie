@@ -1,0 +1,16 @@
+dataset:
+  format: jsonl
+  path: storage/rlvr_datasets/dev.jsonl
+evaluation:
+  batch_size: 32
+  max_workers: 4
+  timeout: 300
+logging:
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
+output:
+  dir: outputs/evaluations
+  format: jsonl
+reward_function:
+  function: stock_prediction_reward
+  module: rlvr.reward_function

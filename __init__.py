@@ -1,1 +1,1 @@
-# Trainer-Charlie package
+# Fireworks-Charlie package

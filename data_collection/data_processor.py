@@ -74,6 +74,13 @@ class DataProcessor:
         df = df.replace({np.nan: None})
 
         processed_data = df[columns].to_dict(orient="records")
+
+        for record in processed_data:
+            if record.get("transaction_date"):
+                record["transaction_date"] = record["transaction_date"].date()
+            if record.get("filing_date"):
+                record["filing_date"] = record["filing_date"].date()
+
         return processed_data
 
     def process_intraday_data(self, raw_data: list, symbol: str, interval: str) -> list:
@@ -160,7 +167,7 @@ class DataProcessor:
             return []
 
         # Collect all unique quarter dates
-        all_quarters = set(balance_sheets.keys()) | set(income_statements.keys())
+        all_quarters = set(balance_sheets.keys()) | set(income_statements.keys()) | set(cash_flows.keys())
 
         processed_records = []
 
@@ -202,6 +209,16 @@ class DataProcessor:
                         return None
 
                 # Create a record for this quarter
+                highlights = raw_data.get("Highlights", {})
+
+                def safe_float(value):
+                    if value in (None, "", "NaN"):
+                        return None
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return None
+
                 record = {
                     "symbol": symbol_clean,
                     "report_date": quarter_date,
@@ -211,20 +228,25 @@ class DataProcessor:
                     "net_income": safe_int(inc_data.get("netIncome")),
                     "operating_income": safe_int(inc_data.get("operatingIncome")),
                     "gross_profit": safe_int(inc_data.get("grossProfit")),
+                    "ebitda": safe_int(inc_data.get("ebitda")),
                     # From Balance Sheet
                     "total_assets": safe_int(bs_data.get("totalAssets")),
                     "total_liabilities": safe_int(bs_data.get("totalLiab")),
                     "stockholder_equity": safe_int(bs_data.get("totalStockholderEquity")),
+                    "cash_and_equivalents": safe_int(bs_data.get("cashAndCashEquivalents")) or safe_int(bs_data.get("cash")) or safe_int(bs_data.get("cashAndShortTermInvestments")),
+                    "total_debt": safe_int(bs_data.get("shortLongTermDebtTotal")) or safe_int(bs_data.get("totalDebt")) or safe_int(bs_data.get("longTermDebt")),
+                    # From Cash Flow Statement
+                    "operating_cash_flow": safe_int(cf_data.get("totalCashFromOperatingActivities")),
+                    "free_cash_flow": safe_int(cf_data.get("freeCashFlow")),
                     # Store full quarterly data as JSON for detailed analysis
                     "balance_sheet_json": json.dumps(bs_data) if bs_data else None,
                     "income_statement_json": json.dumps(inc_data) if inc_data else None,
                     "cash_flow_json": json.dumps(cf_data) if cf_data else None,
-                    # These are snapshot metrics, not in quarterly data
-                    # Set to None for now - could be calculated if needed
-                    "market_cap": None,
-                    "pe_ratio": None,
-                    "eps": None,
-                    "book_value": None,
+                    # Snapshot metrics from highlights
+                    "market_cap": safe_int(highlights.get("MarketCapitalization")),
+                    "pe_ratio": safe_float(highlights.get("PERatio")),
+                    "eps": safe_float(highlights.get("EarningsShare")),
+                    "book_value": safe_float(highlights.get("BookValue")),
                 }
 
                 processed_records.append(record)
@@ -246,8 +268,8 @@ class DataProcessor:
 
         df = pd.DataFrame(raw_data)
         df["symbol"] = symbol.split(".")[0].upper()
-        df = df.rename(columns={"link": "url", "date": "published_date"})
-        df["published_date"] = pd.to_datetime(df["published_date"])
+        df = df.rename(columns={"link": "url", "date": "published_at", "title": "headline"})
+        df["published_at"] = pd.to_datetime(df["published_at"])
         # Extract sentiment polarity score (raw -100 to +100) and categorical sentiment
         df["sentiment_score"] = df["sentiment"].apply(
             lambda x: x.get("polarity") if isinstance(x, dict) and x.get("polarity") is not None else None
@@ -266,13 +288,13 @@ class DataProcessor:
                 else "Neutral"
             ) if isinstance(x, dict) else None
         )
-        df["date"] = df["published_date"].dt.date  # Extract date part for filtering
+        df["date"] = df["published_at"].dt.date  # Extract date part for filtering
 
         # Filter by date and ticker
         df = self._filter_by_date_and_ticker(df, "date", "symbol")
 
         # Select and reorder columns to match DB schema
-        columns = ["symbol", "published_date", "title", "content", "sentiment", "sentiment_score", "sentiment_label", "url"]
+        columns = ["symbol", "published_at", "headline", "content", "sentiment", "sentiment_score", "sentiment_label", "url"]
 
         # Convert NaN to None for proper NULL handling in database
         df = df.replace({np.nan: None})
@@ -297,10 +319,30 @@ class DataProcessor:
                 "transactionCode": "transaction_code",
                 "transactionAmount": "transaction_amount",
                 "transactionPrice": "transaction_price",
+                "reportingOwnerRelationship": "owner_title",
+                "filingDate": "filing_date",
+                "shares": "shares",
+                "sharesOwnedAfterTransaction": "shares_owned_after",
             }
         )
         df["transaction_date"] = pd.to_datetime(df["transaction_date"])
+        if "filing_date" in df.columns:
+            df["filing_date"] = pd.to_datetime(df["filing_date"], errors="coerce")
         df["date"] = df["transaction_date"].dt.date  # Extract date part for filtering
+
+        # Normalize numeric columns
+        numeric_columns = [
+            "transaction_amount",
+            "transaction_price",
+            "shares",
+            "shares_owned_after",
+        ]
+        integer_columns = ["shares", "shares_owned_after", "transaction_amount"]
+        for column in numeric_columns:
+            if column in df.columns:
+                df[column] = pd.to_numeric(df[column], errors="coerce")
+                if column in integer_columns:
+                    df[column] = df[column].apply(lambda x: int(x) if pd.notna(x) else None)
 
         # Filter by date and ticker
         df = self._filter_by_date_and_ticker(df, "date", "symbol")
@@ -309,11 +351,20 @@ class DataProcessor:
         columns = [
             "symbol",
             "transaction_date",
+            "filing_date",
             "owner_name",
+            "owner_title",
             "transaction_code",
-            "transaction_amount",
+            "shares",
             "transaction_price",
+            "transaction_amount",
+            "shares_owned_after",
         ]
+
+        # Ensure all expected columns exist
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
 
         # Convert NaN to None for proper NULL handling in database
         # PostgreSQL cannot store NaN in BIGINT columns

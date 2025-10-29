@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for Trainer-Charlie
+# Setup script for Fireworks-Charlie
 
 set -e
 
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "================================================"
-echo "Trainer-Charlie Setup"
+echo "Fireworks-Charlie Setup"
 echo "================================================"
 
 # Create virtual environment if it doesn't exist
@@ -27,7 +27,7 @@ source "$PROJECT_DIR/.venv/bin/activate"
 echo ""
 echo "Installing dependencies..."
 cd "$PROJECT_DIR"
-uv pip install -e .
+uv pip install -e ".[dev]"
 
 echo ""
 echo "================================================"

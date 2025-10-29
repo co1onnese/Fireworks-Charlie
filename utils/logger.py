@@ -1,12 +1,12 @@
 """
-Centralized logging configuration for Trainer-Charlie
+Centralized logging configuration for Fireworks-Charlie
 """
 import logging
 import sys
 from pathlib import Path
 from datetime import datetime
 
-def setup_logger(name: str = "trainer_charlie", 
+def setup_logger(name: str = "fireworks_charlie", 
                 log_file: str = None,
                 log_level: str = "INFO") -> logging.Logger:
     """

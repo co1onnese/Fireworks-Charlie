@@ -1,5 +1,5 @@
 """
-Main pipeline orchestrator for Trainer-Charlie
+Main pipeline orchestrator for Fireworks-Charlie
 Coordinates data collection, prompt building, and thesis generation
 """
 import logging
@@ -13,19 +13,19 @@ from orchestration.market_calendar import MarketCalendar
 from orchestration.checkpoint_manager import CheckpointManager
 from data_collection.data_orchestrator import DataOrchestrator
 from thesis_generation.prompt_builder import CumulativePromptBuilder
+from thesis_generation.enhanced_prompt_builder import EnhancedCumulativePromptBuilder
 from thesis_generation.data_deduplicator import DataDeduplicator
-from thesis_generation.llm_client import DeepSeekClient
-from thesis_generation.xml_thesis_generator import XMLThesisGenerator
+from thesis_generation.fireworks_client import FireworksDeepSeekClient
 from utils.logger import setup_logger
 
 # Set up logging
 logger = setup_logger(
-    name="trainer_charlie",
+    name="fireworks_charlie",
     log_file=config.LOG_FILE,
     log_level=config.LOG_LEVEL
 )
 
-class TrainerCharliePipeline:
+class FireworksCharliePipeline:
     """Main pipeline for cumulative thesis generation"""
     
     def __init__(self):
@@ -37,25 +37,27 @@ class TrainerCharliePipeline:
         self.market_calendar = MarketCalendar(config.MARKET_CALENDAR)
         self.checkpoint_manager = CheckpointManager(config.CHECKPOINT_DIR)
         self.data_orchestrator = DataOrchestrator(config)
-        self.xml_generator = XMLThesisGenerator(config.THESIS_OUTPUT_DIR)
         
-        # Initialize LLM client
-        if config.DEEPSEEK_API_KEY:
-            self.llm_client = DeepSeekClient(
-                api_key=config.DEEPSEEK_API_KEY,
-                base_url=config.DEEPSEEK_BASE_URL
+        # Initialize Fireworks LLM client
+        if config.FIREWORKS_API_KEY:
+            self.llm_client = FireworksDeepSeekClient(
+                api_key=config.FIREWORKS_API_KEY,
+                model_name=config.MODEL_NAME,
+                model_mode=config.MODEL_MODE,
+                max_tokens=config.MAX_TOKENS,
+                temperature=config.TEMPERATURE
             )
             # Test connection
             if not self.llm_client.test_connection():
-                logger.warning("DeepSeek API connection test failed")
+                logger.warning("Fireworks API connection test failed")
         else:
+            logger.warning("No Fireworks API key provided - thesis generation disabled")
             self.llm_client = None
-            logger.warning("No DeepSeek API key configured - thesis generation will fail")
         
         # Thread pool for parallel processing
         self.executor = ThreadPoolExecutor(max_workers=config.PARALLEL_WORKERS)
         
-        logger.info("TrainerCharliePipeline initialized successfully")
+        logger.info("FireworksCharliePipeline initialized successfully")
     
     def run(self, 
             tickers: List[str] = None,
@@ -237,66 +239,127 @@ class TrainerCharliePipeline:
                 # Add to cumulative data
                 cumulative_data.append(day_data)
                 
-                # Build cumulative prompt
-                logger.debug(f"Building prompt for {ticker} on {trading_day}")
-                prompt = prompt_builder.build_cumulative_prompt(
+                # Build RLVR prompts (system and user)
+                logger.debug(f"Building RLVR prompts for {ticker} on {trading_day}")
+                system_prompt, user_prompt = prompt_builder.build_cumulative_prompt_messages(
                     ticker,
                     cumulative_data,
-                    include_instructions=True
+                    response_format="json"
                 )
                 
-                # Check token count
-                estimated_tokens = len(prompt) // 4  # Rough estimate
-                if estimated_tokens > config.TOKEN_BUDGET:
-                    logger.warning(
-                        f"Prompt for {ticker} on {trading_day} exceeds token budget "
-                        f"({estimated_tokens} > {config.TOKEN_BUDGET})"
-                    )
+                # Enhanced token monitoring
+                estimated_tokens = (len(system_prompt) + len(user_prompt)) // 4
                 
-                # Generate thesis
+                if estimated_tokens > config.TOKEN_BUDGET:
+                    logger.error(
+                        f"Prompt for {ticker} on {trading_day} exceeds token budget "
+                        f"({estimated_tokens} > {config.TOKEN_BUDGET}) - SKIPPING"
+                    )
+                    continue
+                elif estimated_tokens > config.TOKEN_WARNING_THRESHOLD:
+                    logger.warning(
+                        f"Prompt for {ticker} on {trading_day} approaching token limit "
+                        f"({estimated_tokens} > {config.TOKEN_WARNING_THRESHOLD})"
+                    )
+                else:
+                    logger.info(f"Token usage for {ticker} on {trading_day}: {estimated_tokens:,} tokens")
+                
+                # Generate thesis using Fireworks client
                 if self.llm_client:
                     logger.info(f"Generating thesis for {ticker} on {trading_day}")
+                    
+                    # Combine system and user prompts
+                    combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+                    
                     thesis_result = self.llm_client.generate_thesis(
-                        prompt=prompt,
+                        prompt=combined_prompt,
                         ticker=ticker,
                         as_of_date=trading_day.isoformat()
                     )
                     
                     if thesis_result["status"] == "success":
-                        # Save to XML
-                        success = self.xml_generator.append_thesis(
-                            ticker=ticker,
-                            as_of_date=trading_day.isoformat(),
-                            thesis_data=thesis_result
-                        )
-                        
-                        if success:
+                        # Save to database and checkpoint
+                        try:
+                            # Store in database
+                            from data_collection.database_manager import DatabaseManager
+                            db_manager = DatabaseManager(config.DB_URL)
+                            session = db_manager.get_session()
+
+                            # Insert thesis generation
+                            from data_collection.database_manager import ThesisGeneration
+                            # Convert date objects to strings for JSON serialization
+                            import json
+
+                            # Helper function to recursively convert date objects to ISO strings
+                            def convert_dates(obj):
+                                if isinstance(obj, dict):
+                                    return {k: convert_dates(v) for k, v in obj.items()}
+                                elif isinstance(obj, list):
+                                    return [convert_dates(item) for item in obj]
+                                elif hasattr(obj, 'isoformat'):  # date/datetime objects
+                                    return obj.isoformat()
+                                else:
+                                    return obj
+
+                            # Convert assistant_response for database (always apply conversion)
+                            assistant_response = thesis_result.get("assistant_response")
+                            if assistant_response:
+                                assistant_response = convert_dates(assistant_response)
+                            else:
+                                # Fallback if assistant_response is missing
+                                assistant_response = {
+                                    "reasoning": thesis_result.get("reasoning", ""),
+                                    "action": thesis_result.get("action", "hold"),
+                                    "support": thesis_result.get("support", "")
+                                }
+
+                            thesis_gen = ThesisGeneration(
+                                ticker_id=db_manager.get_ticker_id(session, ticker),
+                                as_of_date=trading_day,
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                assistant_response=assistant_response,
+                                predicted_action=thesis_result.get("action", "hold"),
+                                reasoning=thesis_result.get("reasoning"),
+                                support=thesis_result.get("support"),
+                                model_name=config.MODEL_NAME,
+                                generated_at=datetime.utcnow()
+                            )
+                            session.add(thesis_gen)
+                            session.commit()
+
+                            # Add prompt to checkpoint (also convert dates)
+                            checkpoint_assistant_response = thesis_result.get("assistant_response")
+                            if checkpoint_assistant_response:
+                                checkpoint_assistant_response = convert_dates(checkpoint_assistant_response)
+
+                            self.checkpoint_manager.add_prompt_to_checkpoint(
+                                ticker=ticker,
+                                date=trading_day.isoformat(),
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                assistant_response=checkpoint_assistant_response
+                            )
+
+                            session.close()
+
                             theses_generated += 1
                             logger.info(
                                 f"Generated thesis for {ticker} on {trading_day}: "
                                 f"{thesis_result['action']}"
                             )
-                        else:
+
+                        except Exception as e:
+                            logger.error(f"Failed to save thesis to database: {e}")
+                            logger.debug(traceback.format_exc())
                             errors.append({
-                                "date": trading_day,
-                                "error": "Failed to save thesis to XML"
+                                "date": trading_day.isoformat(),  # Convert date to string!
+                                "error": f"Database save failed: {str(e)}"
                             })
                     else:
                         # LLM generation failed
                         error_msg = thesis_result.get("error", "Unknown LLM error")
                         logger.error(f"LLM generation failed: {error_msg}")
-                        
-                        # Add error entry to XML
-                        self.xml_generator.append_thesis(
-                            ticker=ticker,
-                            as_of_date=trading_day.isoformat(),
-                            thesis_data={
-                                "reasoning": f"ERROR: {error_msg}",
-                                "action": "error",
-                                "support": "Failed to generate thesis due to API error"
-                            }
-                        )
-                        
                         errors.append({
                             "date": trading_day,
                             "error": error_msg
@@ -304,22 +367,14 @@ class TrainerCharliePipeline:
                 else:
                     # No LLM client available
                     error_msg = "No LLM client configured"
-                    self.xml_generator.append_thesis(
-                        ticker=ticker,
-                        as_of_date=trading_day.isoformat(),
-                        thesis_data={
-                            "reasoning": f"ERROR: {error_msg}",
-                            "action": "error",
-                            "support": "Cannot generate thesis without LLM configuration"
-                        }
-                    )
+                    logger.error(error_msg)
                     errors.append({
                         "date": trading_day,
                         "error": error_msg
                     })
                 
                 # Save checkpoint after each successful day
-                self.checkpoint_manager.save_checkpoint(
+                self.checkpoint_manager.save_rlvr_checkpoint(
                     ticker=ticker,
                     processed_date=trading_day,
                     cumulative_data=cumulative_data,
@@ -333,25 +388,34 @@ class TrainerCharliePipeline:
                 logger.error(f"Error processing {ticker} on {trading_day}: {e}")
                 logger.debug(traceback.format_exc())
                 
-                # Add error entry
-                self.xml_generator.append_thesis(
-                    ticker=ticker,
-                    as_of_date=trading_day.isoformat(),
-                    thesis_data={
-                        "reasoning": f"ERROR: Pipeline error - {str(e)}",
-                        "action": "error",
-                        "support": "Processing failed due to pipeline error"
-                    }
-                )
-                
                 errors.append({
                     "date": trading_day,
                     "error": str(e)
                 })
         
-        # Get final statistics
-        total_theses = self.xml_generator.get_thesis_count(ticker)
-        latest_thesis = self.xml_generator.get_latest_thesis(ticker)
+        # Get final statistics from database
+        try:
+            from data_collection.database_manager import DatabaseManager
+            db_manager = DatabaseManager(config.DB_URL)
+            session = db_manager.get_session()
+            
+            # Count theses for this ticker
+            from data_collection.database_manager import ThesisGeneration
+            from sqlalchemy import func
+            total_theses = session.query(func.count(ThesisGeneration.thesis_id)).filter(
+                ThesisGeneration.ticker_id == db_manager.get_ticker_id(session, ticker)
+            ).scalar() or 0
+            
+            # Get latest thesis
+            latest_thesis = session.query(ThesisGeneration).filter(
+                ThesisGeneration.ticker_id == db_manager.get_ticker_id(session, ticker)
+            ).order_by(ThesisGeneration.generated_at.desc()).first()
+            
+            session.close()
+        except Exception as e:
+            logger.error(f"Failed to get thesis statistics: {e}")
+            total_theses = 0
+            latest_thesis = None
 
         # Determine status
         if already_complete:

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Main entry point for Trainer-Charlie pipeline
+Main entry point for Fireworks-Charlie pipeline
 """
 import argparse
 import sys
 from datetime import date
 
-from orchestration.main_pipeline import TrainerCharliePipeline
+from orchestration.main_pipeline import FireworksCharliePipeline
 
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="Trainer-Charlie: Cumulative Investment Thesis Generator",
+        description="Fireworks-Charlie: RLVR Investment Thesis Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -29,6 +29,12 @@ Examples:
   
   # Run single ticker for testing
   python main.py --tickers AAPL --start-date 2024-01-01 --end-date 2024-01-10
+
+  # Run in test mode with custom ticker and duration
+  python main.py --test --test-ticker MSFT --test-days 10
+
+  # Run in test mode with defaults (AAPL, 5 days)
+  python main.py --test
 """
     )
     
@@ -61,22 +67,41 @@ Examples:
         action="store_true",
         help="Run in test mode with limited data"
     )
-    
+
+    parser.add_argument(
+        "--test-ticker",
+        type=str,
+        default="AAPL",
+        help="Ticker to use in test mode (default: AAPL)"
+    )
+
+    parser.add_argument(
+        "--test-days",
+        type=int,
+        default=5,
+        help="Number of days to test in test mode (default: 5)"
+    )
+
     args = parser.parse_args()
-    
+
     # Process arguments
     tickers = None
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",")]
-    
+
     # Test mode settings
     if args.test:
         if not tickers:
-            tickers = ["AAPL"]  # Single ticker for testing
+            # Use test-ticker flag or default to AAPL
+            tickers = [args.test_ticker.upper()]
         if not args.start_date:
             args.start_date = "2024-01-01"
         if not args.end_date:
-            args.end_date = "2024-01-05"  # Just 5 days for testing
+            # Calculate end date based on test-days
+            from datetime import datetime, timedelta
+            start_dt = datetime.strptime(args.start_date, "%Y-%m-%d")
+            end_dt = start_dt + timedelta(days=args.test_days)
+            args.end_date = end_dt.strftime("%Y-%m-%d")
     
     # Validate dates if provided
     if args.start_date:
@@ -95,10 +120,10 @@ Examples:
     
     # Create and run pipeline
     try:
-        print("Starting Trainer-Charlie Pipeline...")
+        print("Starting Fireworks-Charlie Pipeline...")
         print("=" * 60)
         
-        pipeline = TrainerCharliePipeline()
+        pipeline = FireworksCharliePipeline()
         
         results = pipeline.run(
             tickers=tickers,

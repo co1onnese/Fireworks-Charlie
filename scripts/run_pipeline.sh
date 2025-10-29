@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run Trainer-Charlie pipeline
+# Run Fireworks-Charlie pipeline
 
 set -e
 
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "================================================"
-echo "Trainer-Charlie Pipeline Runner"
+echo "Fireworks-Charlie Pipeline Runner"
 echo "================================================"
 
 # Check if virtual environment exists
@@ -26,7 +26,7 @@ source "$PROJECT_DIR/.venv/bin/activate"
 if ! python3 -c "import pandas" 2>/dev/null; then
     echo "Installing dependencies..."
     cd "$PROJECT_DIR"
-    uv pip install -e .
+    uv pip install -e ".[dev]"
 fi
 
 # Check for .env file

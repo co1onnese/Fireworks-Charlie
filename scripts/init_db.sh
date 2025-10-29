@@ -1,18 +1,18 @@
 #!/bin/bash
-# Database initialization script for Trainer-Charlie
-# Based on Charlie-T1-DB schema
+# Database initialization script for Fireworks-Charlie
+# Based on RLVR training schema
 
 set -e
 
 # Configuration (override with environment variables)
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-trainer_charlie}"
+DB_NAME="${DB_NAME:-fireworks_charlie}"
 DB_USER="${DB_USER:-charlie_user}"
 DB_PASSWORD="${DB_PASSWORD:-charlie_pass}"
 
 echo "================================================"
-echo "Trainer-Charlie Database Initialization"
+echo "Fireworks-Charlie Database Initialization"
 echo "================================================"
 echo "Host: $DB_HOST:$DB_PORT"
 echo "Database: $DB_NAME"

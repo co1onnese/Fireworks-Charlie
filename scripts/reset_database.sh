@@ -1,16 +1,16 @@
 #!/bin/bash
-# Script to drop and recreate the Trainer-Charlie database
+# Script to drop and recreate the Fireworks-Charlie database
 
 set -e
 
 # Configuration
 DB_HOST="${DB_HOST:-localhost}"
-DB_NAME="${DB_NAME:-trainer_charlie}"
+DB_NAME="${DB_NAME:-fireworks_charlie}"
 DB_USER="${DB_USER:-charlie_user}"
 DB_PASSWORD="${DB_PASSWORD:-charlie_password}"
 
 echo "================================================"
-echo "Trainer-Charlie Database Reset"
+echo "Fireworks-Charlie Database Reset"
 echo "================================================"
 echo "WARNING: This will drop the database and all data!"
 echo "Database: $DB_NAME"

@@ -1,0 +1,1237 @@
+# Fireworks-Charlie: RLVR Training Pipeline
+# Comprehensive Codebase Documentation
+# Last Updated: 2025-10-29
+
+## PROJECT OVERVIEW
+Fireworks-Charlie is an RLVR (Reinforcement Learning with Verifiable Rewards) training pipeline for stock prediction. It collects multi-source financial data, generates investment theses using DeepSeek V3.1-Terminus via Fireworks AI, tracks positions with verifiable outcomes, calculates rewards, and produces JSONL datasets for GRPO fine-tuning.
+
+**Core Innovation**: Point-in-time data integrity with comprehensive analysis engines, hierarchical prompt building, and dual-metric reward calculation (directional accuracy + Sharpe ratio).
+
+## ARCHITECTURE SUMMARY
+```
+External APIs → Data Collection → PostgreSQL → Thesis Generation → Position Tracking → Reward Calculation → JSONL Datasets → GRPO Training
+```
+
+---
+
+## MODULE HIERARCHY
+
+### data_collection/
+**Purpose**: Multi-source financial data ingestion, processing, and feature engineering
+**Dependencies**: sqlalchemy, pandas, numpy, requests
+
+#### database_manager.py
+**Core ORM and database operations**
+
+**Classes**:
+- `DatabaseManager(db_url: str, echo: bool = False)`: Central database manager
+  - `.get_session() -> Session`: Create new session
+  - `.create_all_tables()`: Initialize schema
+  - `.insert_or_get_ticker(session, symbol, exchange='US', company_name, sector, industry) -> Ticker`: Upsert ticker
+  - `.get_ticker_id(session, symbol: str) -> Optional[int]`: Get ticker ID
+  - `.insert_market_data(session, ticker_id: int, market_data: List[Dict])`: Insert OHLCV data
+  - `.insert_macroeconomic_indicators(session, indicators: List[Dict])`: Insert FRED data
+  - `.insert_news_data(session, ticker_id: int, news_data: List[Dict])`: Insert news articles
+  - `.insert_fundamental_data(session, ticker_id: int, fundamental_data: List[Dict])`: Insert financials
+  - `.insert_insider_transactions(session, ticker_id: int, insider_data: List[Dict])`: Insert insider trades
+
+**ORM Models**:
+- `Ticker`: Master registry (ticker_id, symbol, company_name, sector, industry, is_active)
+- `MarketData`: OHLCV + technicals (open, high, low, close, volume, sma_20, sma_50, ema_20, rsi_14, macd, bollinger_*)
+- `Fundamental`: Quarterly financials (revenue, net_income, eps, pe_ratio, market_cap, *_json for raw data)
+- `News`: Articles with sentiment (headline, content, sentiment_score, sentiment_label, published_at)
+- `MacroeconomicIndicator`: FRED series (series_id, indicator_name, date, value, unit, frequency)
+- `MacroFeature`: Derived macro features (yield_curve_10y_2y, cpi_*_pct, gdp_qoq_pct, unemployment_rate_change)
+- `InsiderTransaction`: Insider trades (owner_name, transaction_code, shares, transaction_price, transaction_date)
+- `ThesisGeneration`: AI theses (system_prompt, user_prompt, assistant_response JSONB, predicted_action, reasoning, support)
+- `Position`: 3-day tracking (entry_date, entry_price, exit_date, exit_price, actual_return_pct, days_held, early_exit)
+- `RLVRTrainingExample`: Complete RLVR examples (example_json JSONB, ground_truth JSONB, metadata JSONB, directional_score, sharpe_score, combined_score)
+- `HistoricalReturn`: For Sharpe calculation (return_pct, entry_date, exit_date)
+- `SharpeCalculation`: Cached Sharpe ratios (sharpe_ratio, sharpe_score, returns_used JSONB)
+- `DataCollectionRun`, `RLVRGenerationRun`: Audit logs
+
+#### data_orchestrator.py
+**Coordinates multi-source data collection**
+
+**Class**:
+- `DataOrchestrator(config)`: Main data collection coordinator
+  - `.collect_data_for_ticker(ticker: str, start_date: date, end_date: date) -> Dict`: Full data collection for ticker
+  - `.collect_macro_data(start_date: date, end_date: date) -> Dict`: FRED data collection
+  - `.run_feature_engineering(tickers: List[str], start_date: date, end_date: date) -> Dict`: Calculate technical indicators
+  - `.get_data_for_date(ticker: str, as_of_date: date) -> Dict`: Point-in-time data retrieval
+  - `._serialize_technical(technical) -> Dict`: Serialize OHLCV + indicators
+  - `._serialize_fundamentals(fundamentals) -> Dict`: Serialize financial data
+  - `._serialize_news(news) -> Dict`: Serialize news article
+  - `._serialize_macro_features(macro) -> Dict`: Serialize macro indicators
+
+#### data_processor.py
+**Raw data transformation and normalization**
+
+**Class**:
+- `DataProcessor(target_tickers: list, start_date: str, end_date: str)`: Data cleaning and formatting
+  - `.process_eod_data(raw_data: list, symbol: str) -> list`: Process OHLCV data
+  - `.process_fundamentals(raw_data: dict, symbol: str) -> list`: Extract quarterly financials
+  - `.process_news(raw_data: list, symbol: str) -> list`: Parse news with sentiment
+  - `.process_insider_transactions(raw_data: list, symbol: str) -> list`: Parse insider trades
+  - `.process_fred_series(observations: list, series_info: dict, series_id: str) -> list`: Parse FRED data
+  - `._filter_by_date_and_ticker(df: pd.DataFrame, date_column: str, ticker_column: str) -> pd.DataFrame`: Filter data
+
+#### feature_engineering.py
+**Technical indicator calculation and feature derivation**
+
+**Class**:
+- `FeatureEngineer(db_manager: DatabaseManager, max_workers: int = 2)`: Parallel feature calculation
+  - `.process_all_features(tickers: List[str], start_date: str, end_date: str)`: Multi-threaded processing
+  - `._calculate_technical_indicators(session, ticker_id: int, start_date: str, end_date: str)`: SMA, EMA, RSI, MACD, Bollinger
+  - `._calculate_rsi(prices: pd.Series, period: int = 14) -> pd.Series`: Relative Strength Index
+  - `._calculate_macd(prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, pd.Series]`: MACD calculation
+  - `._calculate_bollinger_bands(prices: pd.Series, period: int = 20, std_dev: float = 2.0) -> Dict[str, pd.Series]`: Bollinger Bands
+  - `._calculate_fundamental_changes(session, ticker_id: int)`: QoQ and YoY growth rates
+  - `._process_macro_features(start_date: str, end_date: str)`: Yield curve, inflation, GDP, unemployment
+  - `._calculate_rolling_sentiment(session, ticker_id: int, start_date: str, end_date: str)`: 7-day sentiment averages
+
+#### technical_analyzer.py
+**Advanced technical analysis and insights**
+
+**Class**:
+- `TechnicalAnalyzer()`: Technical analysis engine
+  - `.analyze_trends(data: List[Dict]) -> Dict`: Trend and momentum analysis
+  - `.generate_insights(data: List[Dict]) -> str`: Human-readable technical insights
+  - `._analyze_short_term_trend(df: pd.DataFrame) -> str`: 5-10 day trends
+  - `._analyze_medium_term_trend(df: pd.DataFrame) -> str`: 20-day trends
+  - `._analyze_long_term_trend(df: pd.DataFrame) -> str`: 50+ day trends
+  - `._analyze_momentum(df: pd.DataFrame) -> Dict`: RSI and MACD momentum
+  - `._analyze_volatility(df: pd.DataFrame) -> Dict`: Price volatility metrics
+  - `._analyze_volume(df: pd.DataFrame) -> Dict`: Volume patterns
+
+#### fundamental_analyzer.py
+**Fundamental analysis and valuation**
+
+**Class**:
+- `FundamentalAnalyzer()`: Fundamental analysis engine
+  - `.analyze_fundamentals(data: List[Dict]) -> Dict`: Comprehensive fundamental analysis
+  - `.generate_insights(data: List[Dict]) -> str`: Human-readable fundamental insights
+  - `._analyze_valuation_metrics(latest: Dict) -> Dict`: P/E, P/B, market cap analysis
+  - `._analyze_growth_metrics(data: List[Dict]) -> Dict`: Revenue and earnings growth
+  - `._analyze_profitability_metrics(latest: Dict) -> Dict`: Margins and ROE
+  - `._analyze_financial_health(latest: Dict) -> Dict`: Balance sheet health
+  - `._analyze_competitive_position(latest: Dict) -> Dict`: Market position
+
+#### news_analyzer.py
+**News sentiment analysis and trend detection**
+
+**Class**:
+- `NewsAnalyzer()`: News analysis engine
+  - `.analyze_news(data: List[Dict]) -> Dict`: Comprehensive news analysis
+  - `.generate_insights(data: List[Dict]) -> str`: Human-readable news insights
+  - `._analyze_sentiment(data: List[Dict]) -> Dict`: Sentiment distribution and averages
+  - `._analyze_temporal_patterns(data: List[Dict]) -> Dict`: News frequency and recency
+  - `._extract_key_themes(data: List[Dict]) -> Dict`: Keyword extraction from headlines
+  - `._assess_news_impact(data: List[Dict]) -> Dict`: High-impact article detection
+  - `._analyze_coverage(data: List[Dict]) -> Dict`: Coverage quality and quantity
+
+#### macro_analyzer.py
+**Macroeconomic environment analysis**
+
+**Class**:
+- `MacroAnalyzer()`: Macro analysis engine
+  - `.analyze_macro_environment(data: List[Dict]) -> Dict`: Comprehensive macro analysis
+  - `.generate_insights(data: List[Dict]) -> str`: Human-readable macro insights
+  - `._analyze_interest_rates(data: List[Dict]) -> Dict`: Yield curve analysis
+  - `._analyze_inflation(data: List[Dict]) -> Dict`: CPI and PCE trends
+  - `._analyze_economic_growth(data: List[Dict]) -> Dict`: GDP and industrial production
+  - `._analyze_employment(data: List[Dict]) -> Dict`: Unemployment trends
+  - `._assess_market_conditions(data: List[Dict]) -> Dict`: Overall market outlook
+
+#### eodhd_client.py (not shown but referenced)
+**EODHD API client for market data**
+- `.get_eod_data(symbol: str, start_date: str, end_date: str) -> List[Dict]`
+- `.get_fundamentals(symbol: str) -> Dict`
+- `.get_news(symbol: str, start_date: str, end_date: str) -> List[Dict]`
+- `.get_insider_transactions(symbol: str, start_date: str, end_date: str) -> List[Dict]`
+
+#### fred_client.py (not shown but referenced)
+**Federal Reserve Economic Data API client**
+- `.get_series_info(series_id: str) -> Dict`
+- `.get_series_observations(series_id: str, start_date: str, end_date: str) -> List[Dict]`
+
+---
+
+### thesis_generation/
+**Purpose**: LLM-powered investment thesis generation with advanced prompt engineering
+**Dependencies**: fireworks-ai, json
+
+#### fireworks_client.py
+**Fireworks AI DeepSeek V3.1-Terminus integration**
+
+**Class**:
+- `FireworksDeepSeekClient(api_key: str, model_name: str = "accounts/fireworks/models/deepseek-v3p1-terminus", model_mode: str = "deepseek-chat", max_tokens: int = 128000, temperature: float = 0.7)`: LLM client
+  - `.generate_thesis(prompt: str, ticker: str, as_of_date: str, temperature: Optional[float] = None, response_format: str = "json") -> Dict`: Generate single thesis
+  - `.generate_multi_response(prompt: str, ticker: str, as_of_date: str, num_responses: int = 4, temperature: Optional[float] = None) -> List[Dict]`: Generate multiple responses for GRPO
+  - `.test_connection() -> bool`: Verify API connection
+  - `._parse_json_response(response: str) -> Dict`: Parse JSON from LLM
+  - `._parse_xml_response(response: str) -> Dict`: Parse XML (legacy)
+
+**Response Format**:
+```json
+{
+  "status": "success",
+  "system_prompt": "...",
+  "user_prompt": "...",
+  "assistant_response": {"reasoning": "...", "action": "buy|sell|hold|...", "support": "..."},
+  "reasoning": "...",
+  "action": "strong_buy|buy|hold|sell|strong_sell",
+  "support": "...",
+  "metadata": {"model": "...", "tokens_used": 12345, "generation_time": 2.5, "temperature": 0.7}
+}
+```
+
+#### enhanced_prompt_builder.py
+**Hierarchical prompt construction with smart summarization**
+
+**Class**:
+- `EnhancedCumulativePromptBuilder(deduplicator: DataDeduplicator = None, technical_analyzer: TechnicalAnalyzer = None)`: Advanced prompt builder
+  - `.build_comprehensive_prompt(ticker: str, data_up_to_date: List[Dict], response_format: str = "json") -> Tuple[str, str]`: Build system and user prompts
+  - `._organize_data_hierarchically(data: List[Dict]) -> Dict`: Group by recency (0-7, 8-30, 31+ days)
+  - `._build_system_prompt(ticker: str, response_format: str) -> str`: Comprehensive analyst system prompt
+  - `._build_hierarchical_user_prompt(ticker: str, organized_data: Dict) -> str`: Multi-level data presentation
+  - `._build_detailed_recent_section(ticker: str, recent_data: List[Dict]) -> List[str]`: Full detail for last 7 days
+  - `._build_summarized_medium_section(ticker: str, medium_data: List[Dict]) -> List[str]`: Weekly summaries for 8-30 days
+  - `._build_historical_insights_section(ticker: str, historical_data: List[Dict]) -> List[str]`: Key patterns for 31+ days
+  - `._build_detailed_technical_analysis(ticker: str, data: List[Dict]) -> List[str]`: Technical indicator details
+  - `._build_detailed_news_analysis(ticker: str, data: List[Dict]) -> List[str]`: News sentiment analysis
+  - `._build_detailed_fundamentals(ticker: str, data: List[Dict]) -> List[str]`: Financial metrics
+  - `._build_detailed_insider_analysis(ticker: str, data: List[Dict]) -> List[str]`: Insider transaction patterns
+  - `._build_data_quality_summary(organized_data: Dict) -> List[str]`: Coverage statistics
+
+**Prompt Structure**:
+```
+=== RECENT DATA (0-7 Days) - FULL DETAIL ===
+• Technical Analysis: OHLCV + all indicators
+• News & Sentiment: All articles with scores
+• Fundamentals: Latest financial metrics
+• Insider Activity: Recent transactions
+
+=== MEDIUM-TERM DATA (8-30 Days) - SUMMARIZED ===
+• Technical Trends: Weekly summaries
+• News Sentiment Trends: Weekly averages
+• Macroeconomic Environment: Key indicators
+
+=== HISTORICAL DATA (31+ Days) - KEY INSIGHTS ===
+• Key Price Levels & Patterns
+• Long-term Trends
+• Historical Volatility
+
+=== DATA QUALITY SUMMARY ===
+Coverage statistics by period
+```
+
+#### data_deduplicator.py (not shown but referenced)
+**Remove repetitive data from prompts**
+- `.deduplicate_cumulative_data(ticker: str, data: List[Dict]) -> List[Dict]`
+- `.deduplicate_news(news_list: List[Dict]) -> List[Dict]`
+- `.deduplicate_macro(macro_list: List[Dict]) -> List[Dict]`
+- `.get_deduplication_stats() -> Dict`
+
+#### prompt_builder.py (legacy, not shown)
+**Original prompt builder**
+- `.build_cumulative_prompt_messages(ticker: str, data: List[Dict], response_format: str) -> Tuple[str, str]`
+
+---
+
+### orchestration/
+**Purpose**: Pipeline coordination, configuration, and state management
+**Dependencies**: concurrent.futures, pandas_market_calendars
+
+#### main_pipeline.py
+**Main orchestration pipeline**
+
+**Class**:
+- `FireworksCharliePipeline()`: Main coordinator
+  - `.run(tickers: List[str] = None, start_date: str = None, end_date: str = None, resume: bool = True) -> Dict`: Execute full pipeline
+  - `._run_data_collection(tickers: List[str], start_date: date, end_date: date) -> Dict`: Phase 1: Collect all data
+  - `._process_ticker(ticker: str, trading_days: List[date], resume: bool) -> Dict`: Phase 2: Generate theses per ticker
+  - `.cleanup()`: Shutdown and cleanup
+
+**Pipeline Phases**:
+1. **Data Collection**: Ticker data → Macro data → Feature engineering
+2. **Thesis Generation**: For each ticker, for each trading day:
+   - Get point-in-time data
+   - Build cumulative prompts
+   - Generate thesis with LLM
+   - Save to database
+   - Checkpoint progress
+
+#### config_manager.py (not shown but referenced)
+**Centralized configuration**
+
+**Singleton**: `config`
+- `DB_URL: str`: PostgreSQL connection
+- `FIREWORKS_API_KEY: str`: Fireworks API key
+- `MODEL_NAME: str`: Model identifier
+- `MODEL_MODE: str`: deepseek-chat or deepseek-reasoner
+- `MAX_TOKENS: int`: Context limit (128000 for V3.1-Terminus)
+- `TEMPERATURE: float`: Sampling temperature
+- `TICKERS: List[str]`: Target tickers
+- `START_DATE: str`: Pipeline start date
+- `END_DATE: str`: Pipeline end date
+- `PARALLEL_WORKERS: int`: Thread pool size
+- `TOKEN_BUDGET: int`: Maximum tokens per prompt
+- `TOKEN_WARNING_THRESHOLD: int`: Warning threshold
+- `LOG_FILE: str`, `LOG_LEVEL: str`: Logging config
+- `.validate()`: Validate configuration
+- `.log_configuration(logger)`: Log settings
+
+#### checkpoint_manager.py (not shown but referenced)
+**State persistence and recovery**
+
+**Class**:
+- `CheckpointManager(checkpoint_dir: str)`
+  - `.save_checkpoint(ticker: str, data: Dict)`: Save ticker state
+  - `.load_checkpoint(ticker: str) -> Optional[Dict]`: Load ticker state
+  - `.save_rlvr_checkpoint(ticker: str, processed_date: date, cumulative_data: List, metadata: Dict)`: Save RLVR checkpoint
+  - `.load_rlvr_checkpoint(ticker: str) -> Optional[Dict]`: Load RLVR checkpoint
+  - `.add_prompt_to_checkpoint(ticker: str, date: str, system_prompt: str, user_prompt: str, assistant_response: Dict)`: Add thesis to checkpoint
+  - `.clean_old_checkpoints(days_to_keep: int = 7) -> int`: Cleanup old checkpoints
+
+#### market_calendar.py (not shown but referenced)
+**Trading day detection**
+
+**Class**:
+- `MarketCalendar(calendar_name: str = "NYSE")`
+  - `.is_trading_day(date: date) -> bool`: Check if trading day
+  - `.get_trading_days(start_date: date, end_date: date) -> List[date]`: Get all trading days
+
+---
+
+### rlvr/
+**Purpose**: RLVR dataset generation, position tracking, and reward calculation
+**Dependencies**: fireworks-reward-kit, numpy
+
+#### dataset_generator.py
+**RLVR dataset creation from thesis generations**
+
+**Class**:
+- `RLVRDatasetGenerator(db_session: Session)`: Dataset generator
+  - `.generate_rlvr_datasets(tickers: Optional[List[str]] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, train_split_date: Optional[str] = None, output_dir: str = "storage/rlvr_datasets") -> Dict`: Generate train/dev JSONL files
+  - `.generate_sample_datasets(output_dir: str = "storage/rlvr_datasets") -> Dict`: Generate sample datasets for testing
+  - `._query_thesis_generations(tickers, start_date, end_date) -> List[Dict]`: Query theses from database
+  - `._calculate_split_date(theses: List[Dict]) -> str`: Calculate 80/20 split date
+  - `._process_thesis_to_example(thesis: Dict) -> Optional[Dict]`: Convert thesis to RLVR example
+  - `._validate_assistant_response(response: Dict) -> bool`: Validate response format
+  - `._calculate_position_return(ticker_id: int, entry_date: str, predicted_action: str) -> Optional[Dict]`: Calculate position outcome
+  - `._get_historical_returns(ticker_id: int, end_date: str, num_periods: int = 30) -> List[float]`: Get historical returns for Sharpe
+
+**Output Format** (JSONL):
+```json
+{
+  "messages": [
+    {"role": "system", "content": "You are a financial analyst..."},
+    {"role": "user", "content": "Analyze AAPL stock..."},
+    {"role": "assistant", "content": "{\"reasoning\": \"...\", \"action\": \"buy\", \"support\": \"...\"}"}
+  ],
+  "ground_truth": {
+    "actual_return_pct": 2.5,
+    "exit_date": "2024-01-05",
+    "days_held": 3,
+    "early_exit": false,
+    "entry_price": 100.0,
+    "exit_price": 102.5
+  },
+  "metadata": {
+    "ticker": "AAPL",
+    "entry_date": "2024-01-02",
+    "historical_returns": [1.2, -0.5, 3.1, ...],
+    "thesis_id": 12345,
+    "position_id": "pos_1_2024-01-02"
+  }
+}
+```
+
+#### position_tracker.py
+**3-day position tracking with early exit logic**
+
+**Class**:
+- `PositionTracker(db_session: Session, hold_days: int = 3, early_exit_enabled: bool = True)`: Position tracker
+  - `.track_position(ticker_id: int, entry_date: date, entry_price: float, predicted_action: str) -> Optional[Dict]`: Track single position
+  - `.track_positions_batch(positions: List[Dict]) -> List[Optional[Dict]]`: Batch position tracking
+  - `.update_all_open_positions() -> Dict`: Update all open positions
+  - `.get_position_performance(ticker_id: int, entry_date: date) -> Optional[Dict]`: Get existing position
+  - `.validate_position_data(ticker_id: int, entry_date: date, entry_price: float, predicted_action: str) -> bool`: Validate inputs
+
+**Position Tracking Logic**:
+- Entry: Entry date + entry price (regular close)
+- Hold: 3 trading days by default
+- Early Exit: If signal changes to hold/sell/strong_sell on day 2 or 3
+- Exit: Exit date + exit price (regular close)
+- Return: (exit_price - entry_price) / entry_price * 100
+
+#### performance_calculator.py
+**Dual-metric reward calculation**
+
+**Class**:
+- `PerformanceCalculator(db_session: Session, directional_weight: float = 0.80, sharpe_weight: float = 0.20, strong_buy_threshold: float = 3.0, buy_threshold: float = 2.0, hold_threshold_low: float = -1.0, hold_threshold_high: float = 1.0, sell_threshold: float = -2.0, strong_sell_threshold: float = -3.0)`: Reward calculator
+  - `.calculate_directional_accuracy(predicted_action: str, actual_return: float) -> Tuple[bool, float, bool, float]`: Binary directional accuracy (0.0 or 1.0)
+  - `.calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.0) -> Dict`: Sharpe ratio from historical returns
+  - `.get_historical_returns(ticker_id: int, end_date: str, num_periods: int = 30) -> List[float]`: Fetch historical returns
+  - `.calculate_reward_score(predicted_action: str, actual_return: float, historical_returns: Optional[List[float]] = None, ticker_id: Optional[int] = None, end_date: Optional[str] = None) -> Dict`: Combined weighted reward
+  - `.calculate_batch_rewards(predictions: List[Dict]) -> List[Dict]`: Batch reward calculation
+
+**Reward Formula**:
+```
+reward_score = (0.80 × directional_accuracy) + (0.20 × sharpe_score)
+
+directional_accuracy = 1.0 if correct direction, 0.0 otherwise
+sharpe_score = min(sharpe_ratio / 1.0, 1.0)  # normalized to [0, 1]
+```
+
+**Directional Accuracy Rules**:
+- `strong_buy`: Correct if return >= 3.0%
+- `buy`: Correct if return >= 2.0%
+- `hold`: Correct if -1.0% <= return <= 1.0%
+- `sell`: Correct if return <= -2.0%
+- `strong_sell`: Correct if return <= -3.0%
+
+#### reward_function.py (not shown but referenced)
+**Fireworks AI reward function**
+
+**Function**:
+- `@reward_function stock_prediction_reward(messages: List[Dict[str, str]], original_messages: Optional[List[Dict[str, str]]], ground_truth: Dict, metadata: Dict, **kwargs) -> EvaluateResult`: Reward function for GRPO training
+
+#### json_formatter.py (not shown but referenced)
+**JSONL formatting utilities**
+- `create_training_example(system_prompt: str, user_prompt: str, ground_truth: Dict, metadata: Dict) -> Dict`
+- `create_dev_example(system_prompt: str, user_prompt: str, assistant_response: Dict, ground_truth: Dict, metadata: Dict) -> Dict`
+- `validate_training_example(example: Dict) -> Tuple[bool, List[str]]`
+- `validate_dev_example(example: Dict) -> Tuple[bool, List[str]]`
+- `write_jsonl_file(examples: List[Dict], filepath: str)`
+- `read_jsonl_file(filepath: str) -> List[Dict]`
+
+#### reward_kit_config.py (not shown but referenced)
+**Fireworks reward-kit configuration generation**
+- `generate_run_eval_config(output_path: str, dataset_path: str, reward_function_module: str)`
+- `generate_train_config(output_path: str, train_file: str, dev_file: str, model_name: str)`
+
+---
+
+### utils/
+**Purpose**: Shared utilities
+**Dependencies**: logging
+
+#### logger.py (not shown but referenced)
+**Centralized logging**
+- `setup_logger(name: str, level: int = logging.INFO, log_file: Optional[str] = None) -> logging.Logger`
+
+---
+
+## ENTRY POINTS
+
+### rlvr_main.py
+**Primary CLI for RLVR operations**
+
+**Commands**:
+```bash
+python rlvr_main.py generate [--tickers AAPL,MSFT] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--train-split-date YYYY-MM-DD] [--output-dir DIR]
+  → Generate RLVR training/dev datasets from thesis generations
+
+python rlvr_main.py test-local [--sample]
+  → Test reward function locally with sample or real data
+
+python rlvr_main.py deploy
+  → Deploy reward function to Fireworks AI
+
+python rlvr_main.py train
+  → Submit GRPO training job to Fireworks AI
+
+python rlvr_main.py validate
+  → Validate RLVR setup (config, database, reward function)
+
+python rlvr_main.py stats
+  → Show RLVR statistics (tickers, theses, positions, examples)
+```
+
+**Functions**:
+- `generate_datasets(args) -> bool`: Dataset generation
+- `test_reward_function(args) -> bool`: Local reward testing
+- `deploy_reward_function(args) -> bool`: Fireworks deployment
+- `train_model(args) -> bool`: GRPO training submission
+- `validate_setup(args) -> bool`: Setup validation
+- `show_stats(args) -> bool`: Statistics display
+
+### main.py (legacy, not shown)
+**Original pipeline entry point**
+```bash
+python main.py
+  → Run traditional thesis generation pipeline
+```
+
+---
+
+## DATA FLOW & CONNECTIONS
+
+```
+                            FIREWORKS-CHARLIE RLVR PIPELINE
+                                     v2.0
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           EXTERNAL DATA SOURCES                             │
+├──────────────┬──────────────┬──────────────┬──────────────┬────────────────┤
+│ EODHD API    │ FRED API     │ News APIs    │ Insider APIs │ Fundamentals   │
+│ • OHLCV      │ • GDP        │ • Headlines  │ • Form 4     │ • 10-K/10-Q    │
+│ • Adjusted   │ • CPI/PCE    │ • Sentiment  │ • Ownership  │ • Earnings     │
+│ • Volume     │ • Rates      │ • Sources    │ • Timing     │ • Ratios       │
+└──────┬───────┴──────┬───────┴──────┬───────┴──────┬───────┴────────┬───────┘
+       │              │              │              │                │
+       └──────────────┴──────────────┴──────────────┴────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DATA COLLECTION LAYER                               │
+├─────────────────────────┬───────────────────────────┬───────────────────────┤
+│ EODHDClient             │ FREDClient                │ DataProcessor         │
+│ • get_eod_data()        │ • get_series_info()       │ • process_eod_data()  │
+│ • get_fundamentals()    │ • get_series_observations│ • process_fundamentals│
+│ • get_news()            │                           │ • process_news()      │
+│ • get_insider_trans()   │                           │ • process_fred()      │
+└─────────┬───────────────┴─────────┬─────────────────┴───────────┬───────────┘
+          │                         │                             │
+          └─────────────────────────┴─────────────────────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │    DataOrchestrator           │
+                    │ • collect_data_for_ticker()   │
+                    │ • collect_macro_data()        │
+                    │ • run_feature_engineering()   │
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         POSTGRESQL DATABASE                                 │
+├──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
+│ Tickers  │ Market   │ Fundamen │ News     │ Macro    │ Insider  │ Thesis   │
+│ • symbol │ Data     │ tals     │ • senti  │ Features │ Trans    │ Gens     │
+│ • name   │ • OHLCV  │ • finratio• headline│ • yields │ • trades │ • prompts│
+│ • sector │ • SMA    │ • revenue│ • content│ • CPI    │ • owner  │ • actions│
+│          │ • RSI    │ • EPS    │ • score  │ • GDP    │ • shares │ • LLM    │
+│          │ • MACD   │ • growth │          │          │          │ response │
+├──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────┬───┤
+│ FeatureEngineer                                                          │   │
+│ • _calculate_technical_indicators() - SMA, EMA, RSI, MACD, Bollinger    │   │
+│ • _calculate_fundamental_changes() - QoQ, YoY growth                    │   │
+│ • _process_macro_features() - Yield curves, inflation, GDP              │   │
+│ • _calculate_rolling_sentiment() - 7-day news sentiment averages        │   │
+└──────────────────────────────────────────────────────────────────────┬───────┘
+                                                                         │
+                              READ (Point-in-Time)                      │
+                                                                         │
+                                    ▼                                    │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     ANALYSIS ENGINES                                        │
+├─────────────────────┬─────────────────────┬─────────────────────┬──────────┤
+│ TechnicalAnalyzer   │ FundamentalAnalyzer │ NewsAnalyzer        │ Macro    │
+│ • analyze_trends()  │ • analyze_valuation │ • analyze_sentiment │ Analyzer │
+│ • generate_insights│ • analyze_growth    │ • extract_themes    │ • yields │
+│ • momentum          │ • analyze_profit    │ • temporal_patterns │ • rates  │
+│ • volatility        │ • financial_health  │ • impact_assessment │ • GDP    │
+└─────────┬───────────┴──────────┬──────────┴──────────┬──────────┴──────┬───┘
+          │                      │                     │                 │
+          └──────────────────────┴─────────────────────┴─────────────────┘
+                                         │
+                                         ▼
+                        ┌────────────────────────────────┐
+                        │  DataDeduplicator              │
+                        │ • deduplicate_cumulative_data()│
+                        │ • deduplicate_news()           │
+                        │ • deduplicate_macro()          │
+                        └────────────┬───────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 PROMPT BUILDING LAYER                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ EnhancedCumulativePromptBuilder                                             │
+│ • build_comprehensive_prompt() → (system_prompt, user_prompt)              │
+│                                                                             │
+│ Hierarchical Data Organization:                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ RECENT (0-7 days) - FULL DETAIL                                     │   │
+│  │ • Technical: Daily OHLCV + all indicators                           │   │
+│  │ • News: All articles with sentiment scores                          │   │
+│  │ • Fundamentals: Latest financial metrics                            │   │
+│  │ • Insider: Recent transactions                                      │   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │ MEDIUM (8-30 days) - SUMMARIZED                                     │   │
+│  │ • Technical: Weekly trend summaries                                 │   │
+│  │ • News: Weekly sentiment averages                                   │   │
+│  │ • Macro: Key indicator changes                                      │   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │ HISTORICAL (31+ days) - KEY INSIGHTS                                │   │
+│  │ • Price levels: Support/resistance                                  │   │
+│  │ • Long-term trends: Multi-month patterns                            │   │
+│  │ • Historical volatility: Risk assessment                            │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       FIREWORKS AI                                          │
+│                   DeepSeek V3.1-Terminus (671B, 37B active)                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ FireworksDeepSeekClient                                                     │
+│ • generate_thesis(prompt, ticker, as_of_date, temp, format) → Dict         │
+│ • generate_multi_response(prompt, ticker, date, n=4) → List[Dict]          │
+│                                                                             │
+│ Response Format (JSON):                                                     │
+│ {                                                                           │
+│   "reasoning": "Comprehensive analysis explaining thesis...",              │
+│   "action": "strong_buy|buy|hold|sell|strong_sell",                        │
+│   "support": "Key evidence with specific metrics..."                       │
+│ }                                                                           │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                    WRITE (with system/user/assistant)
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      THESIS STORAGE                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ThesisGeneration Table:                                                     │
+│ • system_prompt (TEXT) - Full system instructions                          │
+│ • user_prompt (TEXT) - Complete data prompt                                │
+│ • assistant_response (JSONB) - Parsed JSON response                        │
+│ • predicted_action (VARCHAR) - buy/sell/hold/...                           │
+│ • reasoning (TEXT) - Extracted reasoning                                   │
+│ • support (TEXT) - Supporting evidence                                     │
+│ • model_name, temperature, tokens_used, generation_time_ms                 │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                       READ (for RLVR generation)
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   POSITION TRACKING                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PositionTracker (3-day hold with early exit)                               │
+│ • track_position(ticker_id, entry_date, entry_price, action) → Dict        │
+│                                                                             │
+│ Logic:                                                                      │
+│  1. Entry: entry_date + entry_price (regular close)                        │
+│  2. Hold: 3 trading days OR early exit if signal changes                   │
+│  3. Exit: exit_date + exit_price (regular close)                           │
+│  4. Return: (exit_price - entry_price) / entry_price × 100                 │
+│                                                                             │
+│ Stored in Positions Table:                                                 │
+│ • entry_date, entry_price, exit_date, exit_price                           │
+│ • predicted_action, actual_return_pct, days_held, early_exit               │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   PERFORMANCE CALCULATION                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PerformanceCalculator (Dual-metric reward)                                 │
+│                                                                             │
+│ calculate_reward_score(action, return, historical_returns) → Dict          │
+│                                                                             │
+│ Reward Formula:                                                             │
+│   reward = 0.80 × directional_accuracy + 0.20 × sharpe_score               │
+│                                                                             │
+│ Directional Accuracy (Binary: 0.0 or 1.0):                                 │
+│   • strong_buy: return >= +3.0% → 1.0, else 0.0                            │
+│   • buy:        return >= +2.0% → 1.0, else 0.0                            │
+│   • hold:       -1.0% ≤ return ≤ +1.0% → 1.0, else 0.0                     │
+│   • sell:       return <= -2.0% → 1.0, else 0.0                            │
+│   • strong_sell:return <= -3.0% → 1.0, else 0.0                            │
+│                                                                             │
+│ Sharpe Score (Normalized to [0, 1]):                                       │
+│   sharpe_ratio = mean(returns) / std(returns)                              │
+│   sharpe_score = min(sharpe_ratio / 1.0, 1.0)                              │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   RLVR DATASET GENERATION                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ RLVRDatasetGenerator                                                        │
+│ • generate_rlvr_datasets(tickers, start, end, split) → Dict                │
+│                                                                             │
+│ Process:                                                                    │
+│  1. Query thesis_generations from database                                 │
+│  2. For each thesis:                                                        │
+│     a. Calculate position return (entry → 3-day exit)                      │
+│     b. Get historical returns (last 30 periods)                            │
+│     c. Calculate reward score (directional + sharpe)                       │
+│     d. Create RLVR example with ground_truth & metadata                    │
+│  3. Split by date: 80% train, 20% dev                                      │
+│  4. Write JSONL files: train.jsonl, dev.jsonl                              │
+│                                                                             │
+│ JSONL Format:                                                               │
+│ {                                                                           │
+│   "messages": [system, user, assistant],                                   │
+│   "ground_truth": {actual_return_pct, exit_date, days_held, early_exit},  │
+│   "metadata": {ticker, entry_date, historical_returns, thesis_id}         │
+│ }                                                                           │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                          UPLOAD TO FIREWORKS AI
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     FIREWORKS AI GRPO TRAINING                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Inputs:                                                                     │
+│ • train.jsonl - Training examples (no assistant message)                   │
+│ • dev.jsonl - Development examples (with assistant message for eval)       │
+│ • reward_function.py - Custom reward function (deployed evaluator)         │
+│                                                                             │
+│ GRPO Training:                                                              │
+│ 1. Generate n responses per prompt (n=4-8)                                 │
+│ 2. Calculate reward for each response using reward_function                │
+│ 3. Rank responses by reward (group-relative)                               │
+│ 4. Update model to prefer higher-reward responses                          │
+│ 5. Repeat for all training examples                                        │
+│                                                                             │
+│ Output:                                                                     │
+│ • Fine-tuned model checkpoint                                              │
+│ • Training metrics (reward trends, loss curves)                            │
+│ • Dev set evaluation results                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## CODE STYLE GUIDE
+
+### Python Standards
+- **PEP 8 Compliance**: 120-character line limit, 4-space indentation
+- **Type Hints**: Comprehensive - all function params and returns annotated
+- **Docstrings**: Google-style for all public methods and classes
+- **Imports**: Absolute imports, grouped (stdlib → third-party → local)
+- **Naming Conventions**:
+  - `snake_case`: functions, variables, methods
+  - `PascalCase`: classes
+  - `UPPER_CASE`: constants
+- **Error Handling**: Try-except with specific exceptions, logging at appropriate levels
+- **Logging**: Structured logging with context (ticker, date, etc.)
+
+### SQL Standards
+- **Keywords**: UPPERCASE (SELECT, FROM, WHERE, etc.)
+- **Identifiers**: snake_case (table_names, column_names)
+- **Indexes**: Descriptive names (idx_table_column, uq_table_unique_key)
+- **Constraints**: Named constraints (fk_table_ref, ck_table_condition)
+
+### Project Structure
+```
+fireworks-charlie/
+├── data_collection/         # Data ingestion and processing
+│   ├── __init__.py
+│   ├── database_manager.py  # ORM models and DB operations
+│   ├── data_orchestrator.py # Data collection coordinator
+│   ├── data_processor.py    # Raw data processing
+│   ├── feature_engineering.py # Technical indicator calculation
+│   ├── technical_analyzer.py # Technical analysis engine
+│   ├── fundamental_analyzer.py # Fundamental analysis engine
+│   ├── news_analyzer.py     # News sentiment analysis
+│   ├── macro_analyzer.py    # Macroeconomic analysis
+│   ├── eodhd_client.py      # EODHD API client
+│   └── fred_client.py       # FRED API client
+├── thesis_generation/       # LLM thesis generation
+│   ├── __init__.py
+│   ├── fireworks_client.py  # Fireworks AI client
+│   ├── enhanced_prompt_builder.py # Hierarchical prompt builder
+│   ├── prompt_builder.py    # Legacy prompt builder
+│   └── data_deduplicator.py # Data deduplication
+├── orchestration/           # Pipeline coordination
+│   ├── __init__.py
+│   ├── main_pipeline.py     # Main orchestrator
+│   ├── config_manager.py    # Configuration
+│   ├── checkpoint_manager.py # State persistence
+│   └── market_calendar.py   # Trading day detection
+├── rlvr/                    # RLVR-specific components
+│   ├── __init__.py
+│   ├── dataset_generator.py # JSONL dataset generation
+│   ├── position_tracker.py  # Position tracking
+│   ├── performance_calculator.py # Reward calculation
+│   ├── reward_function.py   # Fireworks reward function
+│   ├── json_formatter.py    # JSONL formatting utilities
+│   └── reward_kit_config.py # Reward-kit config generation
+├── utils/                   # Shared utilities
+│   ├── __init__.py
+│   └── logger.py            # Logging setup
+├── scripts/                 # Deployment and training scripts
+│   ├── deploy_reward_function.py
+│   ├── train_grpo_model.py
+│   ├── init_db.sh
+│   ├── setup.sh
+│   └── verify_setup.sh
+├── tests/                   # Test suite
+│   ├── test_reward_function.py
+│   ├── test_json_formatters.py
+│   ├── test_integration.py
+│   └── ...
+├── storage/                 # Runtime data
+│   ├── checkpoints/
+│   ├── rlvr_datasets/
+│   └── logs/
+├── database/               # Database schema
+│   └── schema.sql
+├── conf/                   # Configuration files
+│   └── config.yaml
+├── rlvr_main.py           # RLVR CLI entry point
+├── main.py                # Legacy entry point
+├── pyproject.toml         # Project dependencies
+├── .env.example           # Environment template
+└── README.md              # Project documentation
+```
+
+---
+
+## DATA FORMATS
+
+### Database Schema
+**14 Primary Tables**:
+1. `tickers` - Master ticker registry
+2. `market_data` - Daily OHLCV + technical indicators (partitioned by date)
+3. `fundamentals` - Quarterly financial statements
+4. `news` - News articles with sentiment
+5. `macroeconomic_indicators` - FRED economic data
+6. `macro_features` - Derived macro features
+7. `insider_transactions` - Insider trading activity
+8. `thesis_generations` - AI-generated theses
+9. `positions` - 3-day position tracking
+10. `rlvr_training_examples` - Complete RLVR examples
+11. `historical_returns` - For Sharpe calculation
+12. `sharpe_calculations` - Cached Sharpe ratios
+13. `data_collection_runs` - Audit log
+14. `rlvr_generation_runs` - Audit log
+
+**Key Features**:
+- JSONB columns for flexible storage (assistant_response, example_json, ground_truth, metadata)
+- Partitioned tables for performance (market_data by year)
+- 60+ indexes for query optimization
+- Foreign key constraints with CASCADE delete
+- Unique constraints for data integrity
+- TIMESTAMP columns with automatic updates
+
+### JSONL Training Format
+```json
+{
+  "messages": [
+    {"role": "system", "content": "System instructions..."},
+    {"role": "user", "content": "Complete data prompt..."}
+  ],
+  "ground_truth": {
+    "actual_return_pct": 2.5,
+    "exit_date": "2024-01-05",
+    "days_held": 3,
+    "early_exit": false,
+    "entry_price": 100.0,
+    "exit_price": 102.5
+  },
+  "metadata": {
+    "ticker": "AAPL",
+    "entry_date": "2024-01-02",
+    "historical_returns": [1.2, -0.5, 3.1, 0.8, ...],
+    "thesis_id": 12345,
+    "position_id": "pos_1_2024-01-02"
+  }
+}
+```
+
+### JSONL Dev Format (with assistant)
+```json
+{
+  "messages": [
+    {"role": "system", "content": "..."},
+    {"role": "user", "content": "..."},
+    {"role": "assistant", "content": "{\"reasoning\": \"...\", \"action\": \"buy\", \"support\": \"...\"}"}
+  ],
+  "ground_truth": {...},
+  "metadata": {...}
+}
+```
+
+---
+
+## DEPENDENCIES & REQUIREMENTS
+
+### Core Dependencies
+```toml
+python = "^3.10"
+sqlalchemy = "^2.0"
+psycopg2-binary = "^2.9"
+pandas = "^2.0"
+numpy = "^1.24"
+fireworks-ai = "^0.15"
+pandas-market-calendars = "^4.0"
+python-dotenv = "^1.0"
+requests = "^2.31"
+```
+
+### Development Dependencies
+```toml
+pytest = "^7.4"
+pytest-cov = "^4.1"
+black = "^23.0"
+mypy = "^1.5"
+ruff = "^0.1"
+```
+
+### External Services
+- **Fireworks AI**: LLM inference and GRPO training platform
+- **EODHD**: Market data API (OHLCV, fundamentals, news, insider trades)
+- **FRED**: Federal Reserve economic data API
+- **PostgreSQL 14+**: Database with JSONB support
+
+---
+
+## ARCHITECTURE PATTERNS
+
+### Design Patterns Used
+1. **Factory Pattern**: Dataset generation (training vs dev examples)
+2. **Strategy Pattern**: Multiple LLM clients (Fireworks, legacy DeepSeek)
+3. **Decorator Pattern**: Reward function decorator for Fireworks AI
+4. **Singleton Pattern**: Configuration manager
+5. **Repository Pattern**: DatabaseManager for data access
+6. **Observer Pattern**: Checkpoint manager for state persistence
+7. **Template Method**: Pipeline orchestration with customizable steps
+
+### Key Architectural Principles
+1. **Separation of Concerns**: Clear boundaries between data, business logic, and presentation
+2. **Dependency Injection**: Sessions, configs, and clients injected into constructors
+3. **Point-in-Time Integrity**: All data retrieved "as of" a specific date (no lookahead bias)
+4. **Idempotency**: Checkpointing allows safe resume without duplication
+5. **Parallel Processing**: ThreadPoolExecutor for concurrent ticker processing
+6. **Hierarchical Prompting**: Multi-level data organization (recent → medium → historical)
+7. **Dual-Metric Rewards**: Directional accuracy (80%) + Sharpe ratio (20%)
+
+---
+
+## CONFIGURATION
+
+### Environment Variables (.env)
+```bash
+# Database
+DB_URL=postgresql://user:password@localhost/fireworks_charlie
+
+# Fireworks AI
+FIREWORKS_API_KEY=fw_xxx
+FIREWORKS_ACCOUNT_ID=accounts/xxx
+MODEL_NAME=accounts/fireworks/models/deepseek-v3p1-terminus
+MODEL_MODE=deepseek-chat
+TEMPERATURE=0.7
+MAX_TOKENS=128000
+
+# Data Sources
+EODHD_API_KEY=xxx
+FRED_API_KEY=xxx
+
+# Pipeline Configuration
+TICKERS=AAPL,MSFT,GOOGL,AMZN,TSLA
+START_DATE=2024-01-01
+END_DATE=2024-12-31
+PARALLEL_WORKERS=4
+
+# RLVR Configuration
+EVALUATOR_ID=xxx
+EVALUATOR_NAME=stock-prediction-reward
+DIRECTIONAL_WEIGHT=0.80
+SHARPE_WEIGHT=0.20
+
+# Token Management
+TOKEN_BUDGET=120000
+TOKEN_WARNING_THRESHOLD=100000
+
+# Logging
+LOG_FILE=storage/logs/pipeline.log
+LOG_LEVEL=INFO
+```
+
+---
+
+## COMMON WORKFLOWS
+
+### 1. Initial Setup
+```bash
+# Install dependencies
+pip install -e .
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your API keys
+
+# Initialize database
+./scripts/init_db.sh
+
+# Verify setup
+python rlvr_main.py validate
+```
+
+### 2. Data Collection & Thesis Generation
+```bash
+# Run full pipeline
+python main.py
+
+# Or with custom parameters
+python -c "
+from orchestration.main_pipeline import FireworksCharliePipeline
+pipeline = FireworksCharliePipeline()
+result = pipeline.run(
+    tickers=['AAPL', 'MSFT'],
+    start_date='2024-01-01',
+    end_date='2024-01-31',
+    resume=True
+)
+print(result)
+pipeline.cleanup()
+"
+```
+
+### 3. RLVR Dataset Generation
+```bash
+# Generate RLVR datasets
+python rlvr_main.py generate \
+  --tickers AAPL,MSFT \
+  --start-date 2024-01-01 \
+  --end-date 2024-01-31 \
+  --train-split-date 2024-01-25 \
+  --output-dir storage/rlvr_datasets
+
+# Verify datasets
+ls -lh storage/rlvr_datasets/
+cat storage/rlvr_datasets/train.jsonl | head -1 | jq .
+```
+
+### 4. Reward Function Testing
+```bash
+# Test locally with sample data
+python rlvr_main.py test-local --sample
+
+# Deploy to Fireworks AI
+python rlvr_main.py deploy
+```
+
+### 5. GRPO Training
+```bash
+# Submit training job
+python rlvr_main.py train
+
+# Monitor training
+# (Use Fireworks AI dashboard)
+```
+
+### 6. Statistics & Monitoring
+```bash
+# Show RLVR statistics
+python rlvr_main.py stats
+
+# Database health check
+python -c "
+from data_collection.database_manager import DatabaseManager
+from orchestration.config_manager import config
+db = DatabaseManager(config.DB_URL)
+session = db.get_session()
+result = session.execute('SELECT * FROM database_health_check()')
+for row in result:
+    print(row)
+session.close()
+"
+```
+
+---
+
+## PERFORMANCE CONSIDERATIONS
+
+### Database Optimization
+- **Partitioning**: market_data partitioned by year for fast queries
+- **Indexing**: 60+ indexes on frequently queried columns
+- **Connection Pooling**: SQLAlchemy pool with pre_ping and recycle
+- **JSONB**: Native PostgreSQL JSONB for flexible schema
+
+### Prompt Token Management
+- **Token Budget**: 120,000 tokens (DeepSeek V3.1-Terminus context: 128K)
+- **Token Warning**: 100,000 tokens (triggers warning)
+- **Hierarchical Summarization**: Recent (full) → Medium (summarized) → Historical (insights)
+- **Data Deduplication**: Remove repetitive news and macro data
+
+### Parallel Processing
+- **ThreadPoolExecutor**: Configurable worker count (default: 4)
+- **Ticker-Level Parallelism**: Each ticker processed independently
+- **Database Session per Thread**: Avoid session conflicts
+
+### Checkpoint Management
+- **Incremental Progress**: Save after each trading day
+- **Resume Capability**: Skip already-processed dates
+- **Automatic Cleanup**: Remove checkpoints older than 7 days
+
+---
+
+## ERROR HANDLING & RECOVERY
+
+### Checkpoint-Based Resume
+```python
+# Pipeline automatically resumes from last checkpoint
+result = pipeline.run(resume=True)
+
+# Manual checkpoint inspection
+checkpoint = checkpoint_manager.load_checkpoint('AAPL')
+print(f"Last processed: {checkpoint['last_processed_date']}")
+```
+
+### Error Categories
+1. **Data Collection Errors**: API failures, missing data → Log and skip
+2. **LLM Generation Errors**: Rate limits, parsing failures → Log and retry
+3. **Database Errors**: Connection issues, constraint violations → Rollback and log
+4. **Validation Errors**: Invalid inputs, schema mismatches → Raise immediately
+
+### Logging Strategy
+```python
+logger.debug("Detailed debug info")
+logger.info("Pipeline progress milestones")
+logger.warning("Non-critical issues (e.g., missing optional data)")
+logger.error("Failures that prevent processing (with traceback)")
+```
+
+---
+
+## TESTING STRATEGY
+
+### Test Coverage
+```bash
+pytest tests/ --cov=. --cov-report=html
+# Target: 90%+ coverage
+```
+
+### Test Categories
+1. **Unit Tests**: Individual functions and classes
+   - `test_reward_function.py`: Reward calculation logic
+   - `test_json_formatters.py`: JSONL formatting
+   - `test_technical_analyzer.py`: Technical analysis
+
+2. **Integration Tests**: Multi-component workflows
+   - `test_integration.py`: End-to-end pipeline
+   - `test_pipeline_integration.py`: Data → Thesis → RLVR
+
+3. **Performance Tests**: Token usage and timing
+   - `test_token_usage.py`: Prompt size monitoring
+
+### Manual Testing
+```bash
+# Test with sample data
+python rlvr_main.py test-local --sample
+
+# Validate full setup
+python rlvr_main.py validate
+```
+
+---
+
+## CONCLUSIONS & VETERAN DEVELOPER INSIGHTS
+
+### Architecture Strengths
+✅ **Point-in-Time Integrity**: No lookahead bias - all data strictly "as of" analysis date
+✅ **Hierarchical Prompting**: Smart token management with 3-tier organization
+✅ **Dual-Metric Rewards**: Balanced directional accuracy (80%) + risk-adjusted returns (20%)
+✅ **Comprehensive Analysis**: 4 specialized analyzers (technical, fundamental, news, macro)
+✅ **Production-Ready DB**: Partitioning, JSONB, 60+ indexes, stored procedures
+✅ **Checkpoint Recovery**: Robust state management for long-running pipelines
+✅ **Type Safety**: Comprehensive type hints throughout
+
+### Potential Improvements
+🔧 **Caching Layer**: Redis for frequently accessed data (ticker metadata, macro features)
+🔧 **Async I/O**: Replace ThreadPoolExecutor with asyncio for API calls
+🔧 **Streaming JSONL**: Write examples incrementally instead of batch
+🔧 **Model Registry**: Track multiple model versions and their performance
+🔧 **A/B Testing**: Compare reward functions and hyperparameters
+🔧 **Monitoring**: Prometheus metrics + Grafana dashboards
+🔧 **Unit Test Coverage**: Increase from current level to 95%+
+
+### Code Quality Observations
+⭐ **Excellent**:
+- Consistent naming conventions
+- Comprehensive docstrings
+- Proper separation of concerns
+- Type hints throughout
+- Structured logging
+
+⚠️ **Watch Out For**:
+- Token budget can be exceeded on high-volatility stocks with many news articles
+- Early exit logic requires careful testing for edge cases
+- Sharpe ratio sensitive to outliers in historical returns
+- Database session management in multithreaded context
+
+### Maintenance Guidelines
+1. **Regular DB Maintenance**: Weekly VACUUM ANALYZE, monthly REINDEX
+2. **API Key Rotation**: Quarterly security review
+3. **Dependency Updates**: Monthly `pip list --outdated` check
+4. **Checkpoint Cleanup**: Automated 7-day retention
+5. **Log Rotation**: Daily rotation, 30-day retention
+6. **Backup Strategy**: Daily PostgreSQL backups, 90-day retention
+
+### Scaling Considerations
+- **Horizontal Scaling**: Increase PARALLEL_WORKERS for more tickers
+- **Database Sharding**: Partition by ticker for massive datasets
+- **Distributed Processing**: Celery workers for distributed thesis generation
+- **CDN for Static Data**: Cache FRED data, fundamentals via CDN
+- **Load Balancing**: Multiple Fireworks AI endpoints for high throughput
+
+---
+
+## QUICK REFERENCE CARD
+
+### Essential Commands
+```bash
+# Validate setup
+python rlvr_main.py validate
+
+# Generate datasets
+python rlvr_main.py generate
+
+# Test reward function
+python rlvr_main.py test-local --sample
+
+# Show statistics
+python rlvr_main.py stats
+
+# Deploy & train
+python rlvr_main.py deploy
+python rlvr_main.py train
+```
+
+### Key Files by Purpose
+- **Entry Point**: `rlvr_main.py`
+- **Pipeline**: `orchestration/main_pipeline.py`
+- **LLM Client**: `thesis_generation/fireworks_client.py`
+- **Prompt Builder**: `thesis_generation/enhanced_prompt_builder.py`
+- **Reward Calc**: `rlvr/performance_calculator.py`
+- **Dataset Gen**: `rlvr/dataset_generator.py`
+- **Database**: `data_collection/database_manager.py`
+
+### Critical Configuration
+```python
+# Token management
+TOKEN_BUDGET = 120_000  # Max tokens per prompt
+TOKEN_WARNING = 100_000  # Warning threshold
+
+# Reward weights
+DIRECTIONAL_WEIGHT = 0.80  # 80% weight on directional accuracy
+SHARPE_WEIGHT = 0.20       # 20% weight on Sharpe ratio
+
+# Action thresholds
+STRONG_BUY_THRESHOLD = 3.0%   # Must achieve >= 3.0% return
+BUY_THRESHOLD = 2.0%          # Must achieve >= 2.0% return
+HOLD_THRESHOLD = (-1.0%, 1.0%)# Must stay within range
+SELL_THRESHOLD = -2.0%        # Must achieve <= -2.0% return
+STRONG_SELL_THRESHOLD = -3.0% # Must achieve <= -3.0% return
+```
+
+---
+
+**Documentation Version**: 2.0
+**Last Updated**: 2025-10-29
+**Maintained By**: Fireworks-Charlie Team
+**License**: Proprietary
+
+---
+
+# END OF DOCUMENTATION

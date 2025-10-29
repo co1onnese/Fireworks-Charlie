@@ -1,4 +1,4 @@
-# Data collection modules from Charlie-T1-DB
+# Data collection modules for RLVR training
 from .database_manager import DatabaseManager
 from .data_processor import DataProcessor
 from .eodhd_client import EODHDClient
