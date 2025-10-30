@@ -23,7 +23,7 @@ from orchestration.config_manager import config
 
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Enable debug for troubleshooting
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -93,6 +93,194 @@ def validate_training_files():
     return True
 
 
+def upload_file_to_fireworks(file_path: str, purpose: str = "fine-tune") -> str:
+    """
+    Upload a file to Fireworks AI using the documented two-step API.
+    
+    Based on: https://fireworks.ai/docs/api-reference/upload-dataset-files
+    
+    Step 1: Create dataset to get dataset_id
+    Step 2: Upload file to that dataset_id
+    
+    Args:
+        file_path: Path to the file to upload
+        purpose: Purpose of the file (default: "fine-tune")
+        
+    Returns:
+        Dataset ID from Fireworks
+    """
+    import requests
+    import uuid
+    
+    logger.info(f"Uploading {file_path} to Fireworks AI...")
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {config.FIREWORKS_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Step 1: Create dataset with proper structure
+        dataset_id = f"fw-dataset-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        dataset_name = os.path.basename(file_path).replace('.jsonl', '')
+        
+        create_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets"
+        
+        create_payload = {
+            "datasetId": dataset_id,
+            "dataset": {
+                "displayName": dataset_name,
+                "format": "RL",  # RL format for RLVR/GRPO training
+                "userUploaded": {}
+            }
+        }
+        
+        logger.debug(f"Creating dataset at: {create_url}")
+        logger.debug(f"Payload: {json.dumps(create_payload, indent=2)}")
+        
+        create_response = requests.post(create_url, headers=headers, json=create_payload, timeout=30)
+        
+        logger.debug(f"Create response status: {create_response.status_code}")
+        logger.debug(f"Create response: {create_response.text[:1000]}")
+        
+        if create_response.status_code not in [200, 201]:
+            logger.error(f"Failed to create dataset: {create_response.status_code}")
+            logger.error(f"Response: {create_response.text}")
+            raise Exception(f"Dataset creation failed: {create_response.text}")
+        
+        logger.info(f"✓ Dataset created: {dataset_id}")
+        
+        # Step 2: Get upload endpoint (for files, especially >150MB)
+        file_size = os.path.getsize(file_path)
+        filename = os.path.basename(file_path)
+        
+        # Check if we should use direct upload (<150MB) or signed URL (>150MB)
+        if file_size < 150 * 1024 * 1024:  # Less than 150MB
+            # Use direct :upload endpoint
+            upload_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{dataset_id}:upload"
+            
+            logger.debug(f"Using direct upload to: {upload_url}")
+            logger.debug(f"File size: {file_size:,} bytes (<150MB)")
+            
+            # Don't set Content-Type header for multipart upload
+            upload_headers = {
+                "Authorization": f"Bearer {config.FIREWORKS_API_KEY}"
+            }
+            
+            with open(file_path, 'rb') as f:
+                files = {
+                    'file': (filename, f, 'application/jsonl')
+                }
+                
+                upload_response = requests.post(
+                    upload_url,
+                    headers=upload_headers,
+                    files=files,
+                    timeout=600
+                )
+            
+            logger.debug(f"Upload response status: {upload_response.status_code}")
+            logger.debug(f"Upload response: {upload_response.text[:500]}")
+            
+            if upload_response.status_code not in [200, 201]:
+                logger.error(f"Failed to upload file: {upload_response.status_code}")
+                logger.error(f"Response: {upload_response.text}")
+                raise Exception(f"File upload failed: {upload_response.text}")
+            
+            upload_data = upload_response.json()
+            logger.info(f"✓ File uploaded successfully!")
+            logger.info(f"✓ Dataset ID: {dataset_id}")
+            logger.info(f"✓ Filename: {upload_data.get('filename', filename)}")
+            logger.info(f"✓ Size: {upload_data.get('bytes', file_size):,} bytes")
+            
+        else:
+            # Use signed URL flow for large files
+            logger.debug(f"File size: {file_size:,} bytes (>150MB), using signed URL")
+            
+            get_endpoint_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{dataset_id}:getUploadEndpoint"
+            
+            get_endpoint_payload = {
+                "filenameToSize": {
+                    filename: file_size
+                }
+            }
+            
+            logger.debug(f"Getting upload endpoint: {get_endpoint_url}")
+            endpoint_response = requests.post(
+                get_endpoint_url,
+                headers=headers,
+                json=get_endpoint_payload,
+                timeout=30
+            )
+            
+            if endpoint_response.status_code not in [200, 201]:
+                logger.error(f"Failed to get upload endpoint: {endpoint_response.status_code}")
+                logger.error(f"Response: {endpoint_response.text}")
+                raise Exception(f"Get upload endpoint failed: {endpoint_response.text}")
+            
+            endpoint_data = endpoint_response.json()
+            signed_url = endpoint_data.get('filenameToSignedUrls', {}).get(filename)
+            
+            if not signed_url:
+                raise Exception(f"No signed URL returned for {filename}")
+            
+            logger.info(f"✓ Got signed URL for upload")
+            
+            # Upload to signed URL
+            with open(file_path, 'rb') as f:
+                signed_response = requests.put(
+                    signed_url,
+                    data=f,
+                    headers={'Content-Type': 'application/jsonl'},
+                    timeout=600
+                )
+            
+            if signed_response.status_code not in [200, 201]:
+                logger.error(f"Failed to upload to signed URL: {signed_response.status_code}")
+                raise Exception(f"Signed URL upload failed")
+            
+            logger.info(f"✓ File uploaded to signed URL!")
+            logger.info(f"✓ Dataset ID: {dataset_id}")
+        
+        # Step 3: Validate the uploaded dataset
+        logger.info(f"Validating dataset {dataset_id}...")
+        validate_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{dataset_id}:validateUpload"
+        
+        validate_response = requests.post(
+            validate_url,
+            headers=headers,
+            json={},
+            timeout=60
+        )
+        
+        logger.debug(f"Validation response status: {validate_response.status_code}")
+        logger.debug(f"Validation response: {validate_response.text[:500]}")
+        
+        if validate_response.status_code in [200, 201]:
+            logger.info(f"✓ Dataset validation successful!")
+        elif validate_response.status_code == 400:
+            # Check if it's the "already uploaded" message (which is actually success)
+            response_text = validate_response.text
+            if "already uploaded" in response_text.lower():
+                logger.info(f"✓ Dataset already validated (upload confirmed)")
+            else:
+                logger.warning(f"Dataset validation returned error:")
+                logger.warning(f"Response: {response_text}")
+                logger.warning("Continuing despite validation warning...")
+        else:
+            logger.warning(f"Dataset validation returned {validate_response.status_code}")
+            logger.warning(f"Response: {validate_response.text}")
+            logger.warning("Continuing despite validation warning...")
+        
+        return dataset_id
+    
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        raise
+
+
 def submit_training_job():
     """Submit GRPO training job to Fireworks AI."""
     logger.info("Submitting GRPO training job...")
@@ -111,11 +299,20 @@ def submit_training_job():
         if not validate_training_files():
             return False
         
+        # Upload training and validation files
+        logger.info("Uploading training files to Fireworks AI...")
+        try:
+            train_file_id = upload_file_to_fireworks(config.RLVR_TRAIN_FILE, purpose="fine-tune")
+            dev_file_id = upload_file_to_fireworks(config.RLVR_DEV_FILE, purpose="fine-tune")
+        except Exception as e:
+            logger.error(f"Failed to upload files: {e}")
+            return False
+        
         # Prepare training parameters
         training_params = {
             "model": config.MODEL_NAME,
-            "training_file": config.RLVR_TRAIN_FILE,
-            "validation_file": config.RLVR_DEV_FILE,
+            "training_file": train_file_id,  # Use uploaded file ID
+            "validation_file": dev_file_id,  # Use uploaded file ID
             "hyperparameters": {
                 "n_epochs": config.GRPO_EPOCHS,
                 "learning_rate": config.GRPO_LEARNING_RATE,
@@ -123,10 +320,10 @@ def submit_training_job():
                 "batch_size": config.GRPO_BATCH_SIZE,
                 "algorithm": "grpo",
                 "n_samples": config.GRPO_NUM_RESPONSES,
-                "temperature": config.TEMPERATURE,
-                "max_tokens": config.MAX_TOKENS,
-                "top_p": config.TOP_P,
-                "top_k": config.TOP_K
+                "temperature": config.GEN_TEMPERATURE,  # Use generation temperature
+                "max_tokens": config.GEN_MAX_TOKENS,    # Use generation max tokens
+                "top_p": config.GEN_TOP_P,              # Use generation top_p
+                "top_k": config.GEN_TOP_K               # Use generation top_k
             },
             "reward_config": {
                 "evaluator_id": config.EVALUATOR_ID
@@ -135,6 +332,8 @@ def submit_training_job():
         
         logger.info("Training parameters:")
         logger.info(f"  Model: {training_params['model']}")
+        logger.info(f"  Training file ID: {train_file_id}")
+        logger.info(f"  Validation file ID: {dev_file_id}")
         logger.info(f"  Epochs: {training_params['hyperparameters']['n_epochs']}")
         logger.info(f"  Learning Rate: {training_params['hyperparameters']['learning_rate']}")
         logger.info(f"  LoRA Rank: {training_params['hyperparameters']['lora_rank']}")
@@ -144,38 +343,84 @@ def submit_training_job():
         logger.info(f"  Evaluator ID: {training_params['reward_config']['evaluator_id']}")
 
         # Submit GRPO training job to Fireworks AI
-        logger.info("Submitting training job to Fireworks AI...")
+        logger.info("Submitting GRPO training job to Fireworks AI...")
 
+        import requests
+
+        # Use the correct reinforcement fine-tuning endpoint
+        api_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/reinforcementFineTuningJobs"
+        
+        headers = {
+            "Authorization": f"Bearer {config.FIREWORKS_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        # Prepare API payload according to the reinforcement fine-tuning schema
+        # Dataset and evaluator names must be in full resource format
+        train_dataset_name = f"accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{train_file_id}"
+        dev_dataset_name = f"accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{dev_file_id}"
+        evaluator_name = f"accounts/{config.FIREWORKS_ACCOUNT_ID}/evaluators/{config.EVALUATOR_ID}"
+        
+        payload = {
+            "displayName": f"stock-prediction-grpo-{datetime.now().strftime('%Y%m%d')}",
+            "dataset": train_dataset_name,
+            "evaluationDataset": dev_dataset_name,
+            "evaluator": evaluator_name,
+            "trainingConfig": {
+                "baseModel": training_params['model'],
+                "learningRate": training_params['hyperparameters']['learning_rate'],
+                "loraRank": training_params['hyperparameters']['lora_rank'],
+                "epochs": training_params['hyperparameters']['n_epochs'],
+                "batchSize": training_params['hyperparameters']['batch_size']
+            },
+            "inferenceParameters": {
+                "maxTokens": training_params['hyperparameters']['max_tokens'],
+                "temperature": training_params['hyperparameters']['temperature'],
+                "topP": training_params['hyperparameters']['top_p'],
+                "topK": training_params['hyperparameters']['top_k'],
+                "n": training_params['hyperparameters']['n_samples']  # Number of responses for GRPO
+            }
+        }
+
+        logger.debug(f"API URL: {api_url}")
+        logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+
+        # Submit the training job
+        job_id = None
         try:
-            # Use Fireworks API directly for fine-tuning
-            import requests
+            response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+            
+            logger.debug(f"Response status: {response.status_code}")
+            logger.debug(f"Response body: {response.text[:1000]}")
 
-            api_url = "https://api.fireworks.ai/v1/fine-tuning/jobs"
-            headers = {
-                "Authorization": f"Bearer {config.FIREWORKS_API_KEY}",
-                "Content-Type": "application/json"
-            }
-
-            # Prepare API payload
-            payload = {
-                "model": training_params['model'],
-                "training_file": training_params['training_file'],
-                "validation_file": training_params['validation_file'],
-                "hyperparameters": training_params['hyperparameters'],
-                "reward_config": training_params['reward_config'],
-                "suffix": f"grpo-{datetime.now().strftime('%Y%m%d')}"
-            }
-
-            # Submit the training job
-            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-
-            if response.status_code == 200 or response.status_code == 201:
+            if response.status_code in [200, 201]:
                 job_data = response.json()
-                job_id = job_data.get("id", f"grpo_training_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                # The response has 'name' field which is the resource name
+                job_name = job_data.get("name", "")
+                # Extract job ID from name (format: accounts/{account}/reinforcementFineTuningJobs/{job_id})
+                if job_name:
+                    job_id = job_name.split('/')[-1]
+                else:
+                    job_id = f"grpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-                logger.info(f"✓ Training job submitted successfully!")
+                logger.info(f"✓ GRPO training job submitted successfully!")
                 logger.info(f"Job ID: {job_id}")
-                logger.info(f"Status: {job_data.get('status', 'Submitted')}")
+                logger.info(f"Job Name: {job_name}")
+                logger.info(f"Display Name: {job_data.get('displayName', 'N/A')}")
+                logger.info(f"State: {job_data.get('state', 'SUBMITTED')}")
+                logger.info(f"Dataset: {job_data.get('dataset', train_file_id)}")
+                logger.info(f"Evaluation Dataset: {job_data.get('evaluationDataset', dev_file_id)}")
+                logger.info(f"Evaluator: {job_data.get('evaluator', config.EVALUATOR_ID)}")
+                
+                # Check status
+                status = job_data.get('status', {})
+                if status:
+                    status_code = status.get('code', 'OK')
+                    status_message = status.get('message', '')
+                    if status_code != 'OK':
+                        logger.warning(f"Status code: {status_code}, Message: {status_message}")
+                
+                logger.debug(f"Full response: {json.dumps(job_data, indent=2)}")
 
             else:
                 logger.error(f"API request failed with status {response.status_code}")
@@ -188,26 +433,27 @@ def submit_training_job():
                 logger.info("=" * 60)
                 logger.info("MANUAL SUBMISSION REQUIRED")
                 logger.info("=" * 60)
-                logger.info("Use the Fireworks AI CLI or dashboard to submit:")
-                logger.info(f"  Training file: {training_params['training_file']}")
-                logger.info(f"  Validation file: {training_params['validation_file']}")
+                logger.info("Files have been uploaded. Use the Fireworks AI CLI or dashboard to submit:")
+                logger.info(f"  Training file ID: {train_file_id}")
+                logger.info(f"  Validation file ID: {dev_file_id}")
                 logger.info(f"  Model: {training_params['model']}")
                 logger.info(f"  Evaluator: {training_params['reward_config']['evaluator_id']}")
+                logger.info(f"  Algorithm: GRPO")
+                logger.info(f"\nSee TRAINING_SUBMISSION_GUIDE.md for detailed instructions")
                 logger.info("=" * 60)
-
+        
+        except requests.exceptions.Timeout:
+            logger.error("Request timed out")
+            job_id = f"timeout_grpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
         except requests.exceptions.RequestException as e:
-            logger.error(f"Network error during API call: {e}")
-
-            # Fall back to manual instructions
-            job_id = f"manual_grpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            logger.warning("Network error - falling back to manual submission")
+            logger.error(f"Request failed: {e}")
+            job_id = f"error_grpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
             import traceback
             logger.debug(traceback.format_exc())
-
-            # Create fallback job ID
             job_id = f"error_grpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         # Save job details

@@ -96,6 +96,10 @@ class RLVRDatasetGenerator:
         if not train_split_date:
             train_split_date = self._calculate_split_date(theses)
         
+        # Convert train_split_date to date object if it's a string
+        if isinstance(train_split_date, str):
+            train_split_date = datetime.strptime(train_split_date, "%Y-%m-%d").date()
+        
         logger.info(f"Using train/dev split date: {train_split_date}")
         
         # Process theses into examples
@@ -104,13 +108,18 @@ class RLVRDatasetGenerator:
         
         for thesis in theses:
             try:
-                example = self._process_thesis_to_example(thesis)
+                # Determine if training or dev based on date FIRST
+                # Use as_of_date as the primary date field, fallback to generated_at
+                thesis_date = thesis.get('as_of_date', thesis.get('generated_at'))
+                # Training includes dates up to and including the split date
+                is_training = thesis_date and thesis_date <= train_split_date
+                
+                # Process thesis with appropriate format
+                example = self._process_thesis_to_example(thesis, is_training=is_training)
                 if not example:
                     continue
                 
-                # Determine if training or dev based on date
-                thesis_date = thesis.get('generation_date', thesis.get('created_at'))
-                if thesis_date and thesis_date < train_split_date:
+                if is_training:
                     training_examples.append(example)
                 else:
                     dev_examples.append(example)
@@ -218,20 +227,25 @@ class RLVRDatasetGenerator:
         split_index = int(len(sorted_theses) * 0.8)
         split_thesis = sorted_theses[split_index]
         
-        split_date = split_thesis.get('generation_date', split_thesis.get('created_at'))
+        # Use as_of_date as the primary date field, fallback to generated_at
+        split_date = split_thesis.get('as_of_date', split_thesis.get('generated_at'))
         if isinstance(split_date, str):
-            return split_date[:10]  # Extract YYYY-MM-DD
+            return datetime.strptime(split_date[:10], "%Y-%m-%d").date()
+        elif isinstance(split_date, date):
+            return split_date
         elif hasattr(split_date, 'date'):
-            return split_date.date().strftime("%Y-%m-%d")
+            return split_date.date()
         else:
-            return datetime.now().strftime("%Y-%m-%d")
+            return datetime.now().date()
     
-    def _process_thesis_to_example(self, thesis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _process_thesis_to_example(self, thesis: Dict[str, Any], is_training: bool = False) -> Optional[Dict[str, Any]]:
         """
         Process a thesis generation into a training/development example.
         
         Args:
             thesis: Thesis generation record from database
+            is_training: If True, create training example (no assistant message).
+                        If False, create dev example (with assistant message).
             
         Returns:
             Formatted example dictionary or None if processing fails
@@ -283,21 +297,21 @@ class RLVRDatasetGenerator:
                 "position_id": position_data.get('position_id')
             }
             
-            # Create example based on whether we have assistant response
-            if thesis.get('assistant_response'):
-                # Development example (with assistant response)
-                example = create_dev_example(
+            # Create example based on whether this is training or dev data
+            if is_training:
+                # Training example (no assistant response - model generates during training)
+                example = create_training_example(
                     system_prompt=thesis['system_prompt'],
                     user_prompt=thesis['user_prompt'],
-                    assistant_response=assistant_response,
                     ground_truth=ground_truth,
                     metadata=metadata
                 )
             else:
-                # Training example (no assistant response)
-                example = create_training_example(
+                # Development example (with assistant response for evaluation)
+                example = create_dev_example(
                     system_prompt=thesis['system_prompt'],
                     user_prompt=thesis['user_prompt'],
+                    assistant_response=assistant_response,
                     ground_truth=ground_truth,
                     metadata=metadata
                 )
