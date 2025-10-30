@@ -395,8 +395,8 @@ class DataOrchestrator:
             "stockholder_equity": fundamentals.stockholder_equity,
             "total_debt": fundamentals.total_debt,
             "cash_and_equivalents": fundamentals.cash_and_equivalents,
-            "revenue_qoq_change": float(fundamentals.revenue_qoq_change) if fundamentals.revenue_qoq_change else None,
-            "revenue_yoy_change": float(fundamentals.revenue_yoy_change) if fundamentals.revenue_yoy_change else None,
+            "revenue_qoq_change": float(fundamentals.revenue_qoq_pct) if fundamentals.revenue_qoq_pct else None,
+            "revenue_yoy_change": float(fundamentals.revenue_yoy_pct) if fundamentals.revenue_yoy_pct else None,
         }
     
     def _serialize_news(self, news) -> Dict[str, Any]:

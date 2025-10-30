@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv('.env')
+# Load environment variables (override=True ensures .env file values take precedence)
+load_dotenv('.env', override=True)
 
 class Config:
     """Centralized configuration management"""
@@ -112,8 +112,24 @@ class Config:
         # ====== Processing Configuration ======
         self.PARALLEL_WORKERS = int(os.environ.get("PARALLEL_WORKERS", "2"))
         self.CHECKPOINT_INTERVAL = int(os.environ.get("CHECKPOINT_INTERVAL", "1"))
-        self.TOKEN_BUDGET = int(os.environ.get("TOKEN_BUDGET", "200000"))
-        self.TOKEN_WARNING_THRESHOLD = int(os.environ.get("TOKEN_WARNING_THRESHOLD", "180000"))
+
+        # Token Budget Management
+        # DeepSeek V3.1-Terminus has 131K context window, leave room for response
+        # INPUT tokens + OUTPUT tokens (8192) must be < 131072
+        # So max input budget = 131072 - 8192 = 122880 tokens
+        self.MODEL_CONTEXT_WINDOW = int(os.environ.get("MODEL_CONTEXT_WINDOW", "131072"))
+        self.MAX_COMPLETION_TOKENS = int(os.environ.get("MAX_COMPLETION_TOKENS", "8192"))
+
+        # Conservative token budget to ensure we never exceed context window
+        # Default to 110K to leave comfortable margin
+        self.TOKEN_BUDGET = int(os.environ.get("TOKEN_BUDGET", "110000"))
+        self.TOKEN_WARNING_THRESHOLD = int(os.environ.get("TOKEN_WARNING_THRESHOLD", "90000"))
+
+        # Context compression settings
+        self.MAX_DAYS_RECENT = int(os.environ.get("MAX_DAYS_RECENT", "7"))     # Full detail
+        self.MAX_DAYS_MEDIUM = int(os.environ.get("MAX_DAYS_MEDIUM", "30"))    # Summarized
+        self.MAX_DAYS_HISTORICAL = int(os.environ.get("MAX_DAYS_HISTORICAL", "90"))  # Key insights only
+        self.ENABLE_AGGRESSIVE_COMPRESSION = os.environ.get("ENABLE_AGGRESSIVE_COMPRESSION", "true").lower() == "true"
 
         # ====== Directory Configuration ======
         self.DATA_ROOT = os.environ.get("DATA_ROOT", "/opt/Fireworks-Charlie/data")

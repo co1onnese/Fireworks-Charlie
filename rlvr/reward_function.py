@@ -26,7 +26,7 @@ from orchestration.config_manager import config
 logger = logging.getLogger(__name__)
 
 
-@reward_function
+@reward_function(id="stock-prediction-evaluator")
 def stock_prediction_reward(
     messages: List[Dict[str, str]],
     original_messages: Optional[List[Dict[str, str]]] = None,

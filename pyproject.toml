@@ -25,7 +25,7 @@ dependencies = [
     "ta>=0.11.0",
 
     # Fireworks AI & RLVR
-    "fireworks-ai>=0.15.0",  # Fireworks AI SDK for model inference and training
+    "fireworks-ai[reward-kit]>=0.15.0",  # Fireworks AI SDK with reward-kit for RLVR/GRPO
     "trl>=0.8.0",            # Transformer Reinforcement Learning (for GRPO)
     "torch>=2.0.0",          # PyTorch (required by trl)
     "transformers>=4.30.0",  # HuggingFace Transformers (required by trl)

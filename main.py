@@ -152,12 +152,12 @@ Examples:
                     print(f"{ticker}: Already complete ({result['total_theses']} theses)")
                     if result.get("latest_thesis"):
                         latest = result["latest_thesis"]
-                        print(f"  Latest: {latest['as-of-date']} - {latest['action']}")
+                        print(f"  Latest: {latest.as_of_date} - {latest.predicted_action}")
                 else:
                     print(f"{ticker}: {result['theses_generated']} theses generated")
                     if result.get("latest_thesis"):
                         latest = result["latest_thesis"]
-                        print(f"  Latest: {latest['as-of-date']} - {latest['action']}")
+                        print(f"  Latest: {latest.as_of_date} - {latest.predicted_action}")
             else:
                 print(f"{ticker}: FAILED - {result.get('error', 'Unknown error')}")
         

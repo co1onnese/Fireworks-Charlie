@@ -3,9 +3,9 @@
 # Last Updated: 2025-10-29
 
 ## PROJECT OVERVIEW
-Fireworks-Charlie is an RLVR (Reinforcement Learning with Verifiable Rewards) training pipeline for stock prediction. It collects multi-source financial data, generates investment theses using DeepSeek V3.1-Terminus via Fireworks AI, tracks positions with verifiable outcomes, calculates rewards, and produces JSONL datasets for GRPO fine-tuning.
+Fireworks-Charlie is an RLVR (Reinforcement Learning with Verifiable Rewards) training pipeline for stock prediction. It collects multi-source financial data, generates investment theses using DeepSeek models (via direct API or Fireworks AI), tracks positions with verifiable outcomes, calculates rewards, and produces JSONL datasets for GRPO fine-tuning.
 
-**Core Innovation**: Point-in-time data integrity with comprehensive analysis engines, hierarchical prompt building, and dual-metric reward calculation (directional accuracy + Sharpe ratio).
+**Core Innovation**: Point-in-time data integrity with comprehensive analysis engines, hierarchical prompt building, provider-agnostic LLM integration, and dual-metric reward calculation (directional accuracy + Sharpe ratio).
 
 ## ARCHITECTURE SUMMARY
 ```
@@ -18,7 +18,7 @@ External APIs → Data Collection → PostgreSQL → Thesis Generation → Posit
 
 ### data_collection/
 **Purpose**: Multi-source financial data ingestion, processing, and feature engineering
-**Dependencies**: sqlalchemy, pandas, numpy, requests
+**Dependencies**: sqlalchemy, pandas, numpy, requests, ta, fredapi, finnhub-python
 
 #### database_manager.py
 **Core ORM and database operations**
@@ -143,14 +143,14 @@ External APIs → Data Collection → PostgreSQL → Thesis Generation → Posit
   - `._analyze_employment(data: List[Dict]) -> Dict`: Unemployment trends
   - `._assess_market_conditions(data: List[Dict]) -> Dict`: Overall market outlook
 
-#### eodhd_client.py (not shown but referenced)
+#### eodhd_client.py
 **EODHD API client for market data**
 - `.get_eod_data(symbol: str, start_date: str, end_date: str) -> List[Dict]`
 - `.get_fundamentals(symbol: str) -> Dict`
 - `.get_news(symbol: str, start_date: str, end_date: str) -> List[Dict]`
 - `.get_insider_transactions(symbol: str, start_date: str, end_date: str) -> List[Dict]`
 
-#### fred_client.py (not shown but referenced)
+#### fred_client.py
 **Federal Reserve Economic Data API client**
 - `.get_series_info(series_id: str) -> Dict`
 - `.get_series_observations(series_id: str, start_date: str, end_date: str) -> List[Dict]`
@@ -158,14 +158,47 @@ External APIs → Data Collection → PostgreSQL → Thesis Generation → Posit
 ---
 
 ### thesis_generation/
-**Purpose**: LLM-powered investment thesis generation with advanced prompt engineering
-**Dependencies**: fireworks-ai, json
+**Purpose**: LLM-powered investment thesis generation with advanced prompt engineering and provider flexibility
+**Dependencies**: fireworks-ai, openai, json
+
+#### llm_factory.py
+**Provider-agnostic LLM client creation**
+
+**Function**:
+- `create_llm_client(provider: str, config) -> Union[DeepSeekClient, FireworksDeepSeekClient]`: Factory for creating LLM clients
+  - `provider`: "deepseek" (direct API) or "fireworks" (via Fireworks AI)
+  - Returns appropriate client based on provider configuration
+
+**Usage**:
+```python
+from thesis_generation.llm_factory import create_llm_client
+from orchestration.config_manager import config
+
+# Create client based on LLM_PROVIDER setting
+client = create_llm_client(config.LLM_PROVIDER, config)
+result = client.generate_thesis(prompt, ticker, as_of_date)
+```
+
+#### deepseek_client.py
+**Direct DeepSeek API integration (OpenAI-compatible)**
+
+**Class**:
+- `DeepSeekClient(api_key: str, model_name: str = "deepseek-chat", base_url: str = "https://api.deepseek.com", max_tokens: int = 2048, temperature: float = 0.7, timeout: int = 60)`: Direct DeepSeek API client
+  - `.generate_thesis(prompt: str, ticker: str, as_of_date: str, temperature: Optional[float] = None, response_format: str = "json") -> Dict`: Generate single thesis
+  - `.test_connection() -> bool`: Verify API connection
+  - `._parse_json_response(response: str) -> Dict`: Parse JSON from LLM
+
+**Features**:
+- Direct API access (lower latency, lower cost)
+- OpenAI SDK compatible (uses base_url override)
+- Supports deepseek-chat and deepseek-reasoner models
+- Configurable timeout and retry logic
 
 #### fireworks_client.py
 **Fireworks AI DeepSeek V3.1-Terminus integration**
 
 **Class**:
-- `FireworksDeepSeekClient(api_key: str, model_name: str = "accounts/fireworks/models/deepseek-v3p1-terminus", model_mode: str = "deepseek-chat", max_tokens: int = 128000, temperature: float = 0.7)`: LLM client
+- `FireworksDeepSeekClient(api_key: str, model_name: str = "accounts/fireworks/models/deepseek-v3p1-terminus", model_mode: str = "deepseek-chat", max_tokens: int = 128000, temperature: float = 0.7)`: LLM client via Fireworks
   - `.generate_thesis(prompt: str, ticker: str, as_of_date: str, temperature: Optional[float] = None, response_format: str = "json") -> Dict`: Generate single thesis
   - `.generate_multi_response(prompt: str, ticker: str, as_of_date: str, num_responses: int = 4, temperature: Optional[float] = None) -> List[Dict]`: Generate multiple responses for GRPO
   - `.test_connection() -> bool`: Verify API connection
@@ -226,16 +259,29 @@ External APIs → Data Collection → PostgreSQL → Thesis Generation → Posit
 Coverage statistics by period
 ```
 
-#### data_deduplicator.py (not shown but referenced)
+#### data_deduplicator.py
 **Remove repetitive data from prompts**
 - `.deduplicate_cumulative_data(ticker: str, data: List[Dict]) -> List[Dict]`
 - `.deduplicate_news(news_list: List[Dict]) -> List[Dict]`
 - `.deduplicate_macro(macro_list: List[Dict]) -> List[Dict]`
 - `.get_deduplication_stats() -> Dict`
 
-#### prompt_builder.py (legacy, not shown)
+#### prompt_builder.py (legacy)
 **Original prompt builder**
 - `.build_cumulative_prompt_messages(ticker: str, data: List[Dict], response_format: str) -> Tuple[str, str]`
+
+#### llm_factory.py
+**LLM provider factory and configuration**
+- `create_llm_client(provider: str, **kwargs) -> Union[FireworksDeepSeekClient, DeepSeekClient]`
+- `get_provider_info(provider: str) -> dict`
+- `list_providers() -> list`
+
+#### deepseek_client.py (legacy)
+**Direct DeepSeek API client**
+- `DeepSeekClient(api_key: str, model: str = "deepseek-chat", base_url: str = "https://api.deepseek.com")`
+  - `.generate_thesis(prompt: str, ticker: str, as_of_date: str, temperature: float = 0.7) -> Dict`
+  - `.generate_multi_response(prompt: str, ticker: str, as_of_date: str, num_responses: int = 4) -> List[Dict]`
+  - `.test_connection() -> bool`
 
 ---
 
@@ -262,15 +308,27 @@ Coverage statistics by period
    - Save to database
    - Checkpoint progress
 
-#### config_manager.py (not shown but referenced)
+#### config_manager.py
 **Centralized configuration**
 
 **Singleton**: `config`
+
+**LLM Provider Configuration**:
+- `LLM_PROVIDER: str`: Provider for thesis generation ("deepseek" or "fireworks")
+- `DEEPSEEK_API_KEY: str`: DeepSeek API key (for direct access)
+- `DEEPSEEK_MODEL: str`: DeepSeek model name (deepseek-chat or deepseek-reasoner)
+- `DEEPSEEK_BASE_URL: str`: DeepSeek API base URL (default: https://api.deepseek.com)
+- `API_TIMEOUT: int`: API request timeout in seconds (default: 60)
+
+**Fireworks Configuration**:
+- `FIREWORKS_API_KEY: str`: Fireworks API key (required for RLVR/GRPO training)
+- `FIREWORKS_ACCOUNT_ID: str`: Fireworks account ID
+- `MODEL_NAME: str`: Fireworks model identifier (for LLM_PROVIDER=fireworks)
+- `MODEL_MODE: str`: deepseek-chat or deepseek-reasoner (for LLM_PROVIDER=fireworks)
+
+**General Settings**:
 - `DB_URL: str`: PostgreSQL connection
-- `FIREWORKS_API_KEY: str`: Fireworks API key
-- `MODEL_NAME: str`: Model identifier
-- `MODEL_MODE: str`: deepseek-chat or deepseek-reasoner
-- `MAX_TOKENS: int`: Context limit (128000 for V3.1-Terminus)
+- `MAX_TOKENS: int`: Context limit (128000 for Fireworks, 2048 for DeepSeek direct)
 - `TEMPERATURE: float`: Sampling temperature
 - `TICKERS: List[str]`: Target tickers
 - `START_DATE: str`: Pipeline start date
@@ -279,10 +337,13 @@ Coverage statistics by period
 - `TOKEN_BUDGET: int`: Maximum tokens per prompt
 - `TOKEN_WARNING_THRESHOLD: int`: Warning threshold
 - `LOG_FILE: str`, `LOG_LEVEL: str`: Logging config
-- `.validate()`: Validate configuration
-- `.log_configuration(logger)`: Log settings
 
-#### checkpoint_manager.py (not shown but referenced)
+**Methods**:
+- `.validate() -> Dict[str, bool]`: Validate configuration
+- `.log_configuration(logger)`: Log settings
+- `.get_active_apis() -> List[str]`: Get active API providers
+
+#### checkpoint_manager.py
 **State persistence and recovery**
 
 **Class**:
@@ -293,14 +354,20 @@ Coverage statistics by period
   - `.load_rlvr_checkpoint(ticker: str) -> Optional[Dict]`: Load RLVR checkpoint
   - `.add_prompt_to_checkpoint(ticker: str, date: str, system_prompt: str, user_prompt: str, assistant_response: Dict)`: Add thesis to checkpoint
   - `.clean_old_checkpoints(days_to_keep: int = 7) -> int`: Cleanup old checkpoints
+  - `.get_last_processed_date(ticker: str) -> Optional[date]`: Get last processed date
+  - `.delete_checkpoint(ticker: str) -> bool`: Delete specific checkpoint
+  - `.list_checkpoints() -> List[Dict[str, Any]]`: List all checkpoints
 
-#### market_calendar.py (not shown but referenced)
+#### market_calendar.py
 **Trading day detection**
 
 **Class**:
 - `MarketCalendar(calendar_name: str = "NYSE")`
   - `.is_trading_day(date: date) -> bool`: Check if trading day
   - `.get_trading_days(start_date: date, end_date: date) -> List[date]`: Get all trading days
+  - `.get_previous_trading_day(from_date: date) -> date`: Get previous trading day
+  - `.get_next_trading_day(from_date: date) -> date`: Get next trading day
+  - `.get_major_holidays(year: int) -> Set[date]`: Get major holidays
 
 ---
 
@@ -392,13 +459,13 @@ sharpe_score = min(sharpe_ratio / 1.0, 1.0)  # normalized to [0, 1]
 - `sell`: Correct if return <= -2.0%
 - `strong_sell`: Correct if return <= -3.0%
 
-#### reward_function.py (not shown but referenced)
+#### reward_function.py
 **Fireworks AI reward function**
 
 **Function**:
 - `@reward_function stock_prediction_reward(messages: List[Dict[str, str]], original_messages: Optional[List[Dict[str, str]]], ground_truth: Dict, metadata: Dict, **kwargs) -> EvaluateResult`: Reward function for GRPO training
 
-#### json_formatter.py (not shown but referenced)
+#### json_formatter.py
 **JSONL formatting utilities**
 - `create_training_example(system_prompt: str, user_prompt: str, ground_truth: Dict, metadata: Dict) -> Dict`
 - `create_dev_example(system_prompt: str, user_prompt: str, assistant_response: Dict, ground_truth: Dict, metadata: Dict) -> Dict`
@@ -406,11 +473,15 @@ sharpe_score = min(sharpe_ratio / 1.0, 1.0)  # normalized to [0, 1]
 - `validate_dev_example(example: Dict) -> Tuple[bool, List[str]]`
 - `write_jsonl_file(examples: List[Dict], filepath: str)`
 - `read_jsonl_file(filepath: str) -> List[Dict]`
+- `create_sample_training_examples(num_examples: int = 3) -> List[Dict[str, Any]]`
+- `create_sample_dev_examples(num_examples: int = 3) -> List[Dict[str, Any]]`
 
-#### reward_kit_config.py (not shown but referenced)
+#### reward_kit_config.py
 **Fireworks reward-kit configuration generation**
 - `generate_run_eval_config(output_path: str, dataset_path: str, reward_function_module: str)`
 - `generate_train_config(output_path: str, train_file: str, dev_file: str, model_name: str)`
+- `create_sample_dataset(output_path: str, num_examples: int = 10)`
+- `validate_dataset_format(dataset_path: str) -> Dict[str, Any]`
 
 ---
 
@@ -418,7 +489,7 @@ sharpe_score = min(sharpe_ratio / 1.0, 1.0)  # normalized to [0, 1]
 **Purpose**: Shared utilities
 **Dependencies**: logging
 
-#### logger.py (not shown but referenced)
+#### logger.py
 **Centralized logging**
 - `setup_logger(name: str, level: int = logging.INFO, log_file: Optional[str] = None) -> logging.Logger`
 
@@ -448,6 +519,9 @@ python rlvr_main.py validate
 
 python rlvr_main.py stats
   → Show RLVR statistics (tickers, theses, positions, examples)
+
+python rlvr_main.py status [--job-id JOB_ID]
+  → Check GRPO training job status
 ```
 
 **Functions**:
@@ -457,11 +531,12 @@ python rlvr_main.py stats
 - `train_model(args) -> bool`: GRPO training submission
 - `validate_setup(args) -> bool`: Setup validation
 - `show_stats(args) -> bool`: Statistics display
+- `check_training_status(args) -> bool`: Training job status
 
-### main.py (legacy, not shown)
-**Original pipeline entry point**
+### main.py
+**Legacy pipeline entry point**
 ```bash
-python main.py
+python main.py [--tickers AAPL,MSFT] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--no-resume] [--test] [--test-ticker TICKER] [--test-days DAYS]
   → Run traditional thesis generation pipeline
 ```
 
@@ -740,7 +815,9 @@ fireworks-charlie/
 │   ├── fireworks_client.py  # Fireworks AI client
 │   ├── enhanced_prompt_builder.py # Hierarchical prompt builder
 │   ├── prompt_builder.py    # Legacy prompt builder
-│   └── data_deduplicator.py # Data deduplication
+│   ├── data_deduplicator.py # Data deduplication
+│   ├── llm_factory.py       # LLM provider factory
+│   └── deepseek_client.py   # Legacy DeepSeek client
 ├── orchestration/           # Pipeline coordination
 │   ├── __init__.py
 │   ├── main_pipeline.py     # Main orchestrator
@@ -774,13 +851,16 @@ fireworks-charlie/
 │   ├── rlvr_datasets/
 │   └── logs/
 ├── database/               # Database schema
-│   └── schema.sql
+│   ├── 01_tables.sql
+│   ├── 02_indexes.sql
+│   ├── 03_views.sql
+│   └── 04_functions.sql
 ├── conf/                   # Configuration files
-│   └── config.yaml
+│   ├── run_eval.yaml
+│   └── train_config.yaml
 ├── rlvr_main.py           # RLVR CLI entry point
 ├── main.py                # Legacy entry point
 ├── pyproject.toml         # Project dependencies
-├── .env.example           # Environment template
 └── README.md              # Project documentation
 ```
 
@@ -866,6 +946,14 @@ fireworks-ai = "^0.15"
 pandas-market-calendars = "^4.0"
 python-dotenv = "^1.0"
 requests = "^2.31"
+yfinance = "^0.2.40"
+fredapi = "^0.5.0"
+finnhub-python = "^2.4.0"
+ta = "^0.11.0"
+trl = "^0.8.0"
+torch = "^2.0.0"
+transformers = "^4.30.0"
+peft = "^0.4.0"
 ```
 
 ### Development Dependencies
@@ -888,7 +976,7 @@ ruff = "^0.1"
 ## ARCHITECTURE PATTERNS
 
 ### Design Patterns Used
-1. **Factory Pattern**: Dataset generation (training vs dev examples)
+1. **Factory Pattern**: Dataset generation (training vs dev examples), LLM client creation
 2. **Strategy Pattern**: Multiple LLM clients (Fireworks, legacy DeepSeek)
 3. **Decorator Pattern**: Reward function decorator for Fireworks AI
 4. **Singleton Pattern**: Configuration manager
@@ -925,6 +1013,10 @@ MAX_TOKENS=128000
 # Data Sources
 EODHD_API_KEY=xxx
 FRED_API_KEY=xxx
+FINNHUB_API_KEY=xxx
+FMP_API_KEY=xxx
+NEWSAPI_KEY=xxx
+SERPAPI_KEY=xxx
 
 # Pipeline Configuration
 TICKERS=AAPL,MSFT,GOOGL,AMZN,TSLA
@@ -1017,7 +1109,7 @@ python rlvr_main.py deploy
 python rlvr_main.py train
 
 # Monitor training
-# (Use Fireworks AI dashboard)
+python rlvr_main.py status
 ```
 
 ### 6. Statistics & Monitoring
@@ -1136,6 +1228,9 @@ python rlvr_main.py validate
 ✅ **Production-Ready DB**: Partitioning, JSONB, 60+ indexes, stored procedures
 ✅ **Checkpoint Recovery**: Robust state management for long-running pipelines
 ✅ **Type Safety**: Comprehensive type hints throughout
+✅ **Modular Design**: Clear separation of concerns with well-defined interfaces
+✅ **Factory Pattern**: Flexible LLM provider selection and dataset generation
+✅ **Comprehensive Logging**: Structured logging with context throughout
 
 ### Potential Improvements
 🔧 **Caching Layer**: Redis for frequently accessed data (ticker metadata, macro features)
@@ -1145,20 +1240,28 @@ python rlvr_main.py validate
 🔧 **A/B Testing**: Compare reward functions and hyperparameters
 🔧 **Monitoring**: Prometheus metrics + Grafana dashboards
 🔧 **Unit Test Coverage**: Increase from current level to 95%+
+🔧 **API Rate Limiting**: Implement exponential backoff for external APIs
+🔧 **Data Validation**: Add Pydantic models for data validation
+🔧 **Configuration Validation**: Runtime validation of all configuration parameters
 
 ### Code Quality Observations
 ⭐ **Excellent**:
-- Consistent naming conventions
-- Comprehensive docstrings
-- Proper separation of concerns
-- Type hints throughout
-- Structured logging
+- Consistent naming conventions across all modules
+- Comprehensive docstrings with Google-style format
+- Proper separation of concerns with clear module boundaries
+- Type hints throughout the codebase
+- Structured logging with appropriate levels
+- Error handling with specific exception types
+- Database schema with proper constraints and indexes
+- Checkpoint-based recovery for long-running processes
 
 ⚠️ **Watch Out For**:
 - Token budget can be exceeded on high-volatility stocks with many news articles
 - Early exit logic requires careful testing for edge cases
 - Sharpe ratio sensitive to outliers in historical returns
 - Database session management in multithreaded context
+- API rate limits may cause delays in data collection
+- Large datasets may require memory optimization
 
 ### Maintenance Guidelines
 1. **Regular DB Maintenance**: Weekly VACUUM ANALYZE, monthly REINDEX
@@ -1167,6 +1270,8 @@ python rlvr_main.py validate
 4. **Checkpoint Cleanup**: Automated 7-day retention
 5. **Log Rotation**: Daily rotation, 30-day retention
 6. **Backup Strategy**: Daily PostgreSQL backups, 90-day retention
+7. **Performance Monitoring**: Track token usage, generation times, and database performance
+8. **Code Quality**: Regular linting with ruff and type checking with mypy
 
 ### Scaling Considerations
 - **Horizontal Scaling**: Increase PARALLEL_WORKERS for more tickers
@@ -1174,6 +1279,8 @@ python rlvr_main.py validate
 - **Distributed Processing**: Celery workers for distributed thesis generation
 - **CDN for Static Data**: Cache FRED data, fundamentals via CDN
 - **Load Balancing**: Multiple Fireworks AI endpoints for high throughput
+- **Memory Optimization**: Streaming data processing for large datasets
+- **Caching Strategy**: Redis for frequently accessed data and computed features
 
 ---
 
@@ -1196,6 +1303,9 @@ python rlvr_main.py stats
 # Deploy & train
 python rlvr_main.py deploy
 python rlvr_main.py train
+
+# Check training status
+python rlvr_main.py status
 ```
 
 ### Key Files by Purpose
@@ -1206,6 +1316,7 @@ python rlvr_main.py train
 - **Reward Calc**: `rlvr/performance_calculator.py`
 - **Dataset Gen**: `rlvr/dataset_generator.py`
 - **Database**: `data_collection/database_manager.py`
+- **Config**: `orchestration/config_manager.py`
 
 ### Critical Configuration
 ```python
@@ -1227,7 +1338,7 @@ STRONG_SELL_THRESHOLD = -3.0% # Must achieve <= -3.0% return
 
 ---
 
-**Documentation Version**: 2.0
+**Documentation Version**: 2.1
 **Last Updated**: 2025-10-29
 **Maintained By**: Fireworks-Charlie Team
 **License**: Proprietary

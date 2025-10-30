@@ -9,37 +9,54 @@ from data_collection.database_manager import Ticker, MarketData, News, InsiderTr
 
 class TestEnhancedDataCollection(unittest.TestCase):
     """Test cases for enhanced data collection"""
-    
-    def setUp(self):
-        """Set up test fixtures"""
+
+    @patch('data_collection.data_orchestrator.FeatureEngineer')
+    @patch('data_collection.data_orchestrator.FREDClient')
+    @patch('data_collection.data_orchestrator.EODHDClient')
+    @patch('data_collection.data_orchestrator.DatabaseManager')
+    def setUp(self, mock_db_class, mock_eodhd_class, mock_fred_class, mock_feature_class):
+        """Set up test fixtures with proper mocking"""
+        # Create proper config mock with all required attributes
         self.config = Mock()
+        self.config.DB_URL = "postgresql://test:test@localhost/test_db"
+        self.config.EODHD_API_KEY = "test_eodhd_key"
+        self.config.FRED_API_KEY = "test_fred_key"
         self.config.PARALLEL_WORKERS = 2
-        
-        # Mock database manager
+
+        # Setup mock database manager instance
         self.mock_db_manager = Mock()
         self.mock_session = Mock()
         self.mock_db_manager.get_session.return_value = self.mock_session
-        
-        # Create orchestrator
+        mock_db_class.return_value = self.mock_db_manager
+
+        # Setup mock client instances (return None if no API key is acceptable)
+        self.mock_eodhd_client = Mock()
+        mock_eodhd_class.return_value = self.mock_eodhd_client
+
+        self.mock_fred_client = Mock()
+        mock_fred_class.return_value = self.mock_fred_client
+
+        # Create orchestrator (will use mocked dependencies)
         self.orchestrator = DataOrchestrator(self.config)
-        self.orchestrator.db_manager = self.mock_db_manager
     
     def test_get_data_for_date_90_days_technical(self):
         """Test that technical data collection is expanded to 90 days"""
         # Mock ticker
         mock_ticker = Mock()
         mock_ticker.ticker_id = 1
-        self.mock_session.query.return_value.filter_by.return_value.first.return_value = mock_ticker
-        
-        # Mock technical data (90 days)
+
+        # Mock technical data (90 days) with proper spec
         mock_technical_data = []
         for i in range(90):
-            mock_data = Mock()
+            mock_data = Mock(spec=['date', 'open', 'high', 'low', 'close', 'adjusted_close',
+                                    'volume', 'sma_20', 'sma_50', 'ema_20', 'rsi_14',
+                                    'macd', 'macd_signal', 'bollinger_upper', 'bollinger_lower'])
             mock_data.date = date(2024, 1, 15) - timedelta(days=i)
             mock_data.open = 100.0
             mock_data.high = 105.0
             mock_data.low = 98.0
             mock_data.close = 103.0
+            mock_data.adjusted_close = 102.5
             mock_data.volume = 1000000
             mock_data.sma_20 = 102.0
             mock_data.sma_50 = 101.0
@@ -50,26 +67,42 @@ class TestEnhancedDataCollection(unittest.TestCase):
             mock_data.bollinger_upper = 108.0
             mock_data.bollinger_lower = 97.0
             mock_technical_data.append(mock_data)
-        
-        # Mock query chain
-        mock_query = Mock()
-        mock_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_technical_data
-        self.mock_session.query.return_value = mock_query
-        
-        # Mock other data sources
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None  # No fundamentals
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []  # No news
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None  # No macro
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []  # No insider
-        
+
+        # Track the limit call for verification
+        limit_calls = []
+
+        # Use side_effect to handle multiple different queries
+        def query_side_effect(model_class):
+            mock_query = Mock()
+            if model_class.__name__ == 'Ticker':
+                mock_query.filter_by.return_value.first.return_value = mock_ticker
+            elif model_class.__name__ == 'MarketData':
+                # Create a mock limit that tracks calls
+                mock_limit = Mock()
+                mock_limit.all.return_value = mock_technical_data
+                # Track the limit call
+                def track_limit(n):
+                    limit_calls.append(n)
+                    return mock_limit
+                mock_query.filter.return_value.order_by.return_value.limit = track_limit
+            elif model_class.__name__ == 'Fundamental':
+                mock_query.filter.return_value.order_by.return_value.first.return_value = None
+            elif model_class.__name__ == 'News':
+                mock_query.filter.return_value.order_by.return_value.all.return_value = []
+            elif model_class.__name__ == 'MacroFeature':
+                mock_query.filter.return_value.order_by.return_value.first.return_value = None
+            elif model_class.__name__ == 'InsiderTransaction':
+                mock_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+            return mock_query
+
+        self.mock_session.query.side_effect = query_side_effect
+
         # Test the method
         result = self.orchestrator.get_data_for_date("AAPL", date(2024, 1, 15))
-        
+
         # Verify 90 days of technical data was requested
-        self.mock_session.query.assert_called()
-        # The limit should be 90, not 15
-        mock_query.filter.return_value.order_by.return_value.limit.assert_called_with(90)
-        
+        self.assertIn(90, limit_calls, f"Expected limit(90) to be called, but got limits: {limit_calls}")
+
         # Verify result structure
         self.assertIn("technical", result)
         self.assertEqual(len(result["technical"]), 90)
@@ -123,39 +156,43 @@ class TestEnhancedDataCollection(unittest.TestCase):
         # Mock ticker
         mock_ticker = Mock()
         mock_ticker.ticker_id = 1
-        self.mock_session.query.return_value.filter_by.return_value.first.return_value = mock_ticker
-        
-        # Mock insider transactions
+
+        # Mock insider transactions with proper spec to avoid Mock float conversion issues
         mock_insider_data = []
         for i in range(20):
-            mock_insider = Mock()
+            mock_insider = Mock(spec=['transaction_date', 'owner_name', 'transaction_code',
+                                       'shares', 'price', 'amount', 'shares_owned_after'])
             mock_insider.transaction_date = date(2024, 1, 15) - timedelta(days=i)
             mock_insider.owner_name = f"Owner {i}"
             mock_insider.transaction_code = "P" if i % 2 == 0 else "S"
-            mock_insider.shares = 1000 + i * 100
-            mock_insider.price = 100.0 + i
-            mock_insider.amount = 100000.0 + i * 10000
-            mock_insider.shares_owned_after = 10000 + i * 1000
+            mock_insider.shares = 1000 + i * 100  # int
+            mock_insider.price = 100.0 + float(i)  # Explicit float
+            mock_insider.amount = 100000.0 + float(i * 10000)  # Explicit float
+            mock_insider.shares_owned_after = 10000 + i * 1000  # int
             mock_insider_data.append(mock_insider)
-        
-        # Mock query chain for technical data (no data)
-        mock_query = Mock()
-        mock_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-        self.mock_session.query.return_value = mock_query
-        
-        # Mock other data sources
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None  # No fundamentals
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []  # No news
-        self.mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None  # No macro
-        
-        # Mock insider transactions query
-        mock_insider_query = Mock()
-        mock_insider_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_insider_data
-        self.mock_session.query.return_value = mock_insider_query
-        
+
+        # Use side_effect to handle multiple different queries
+        def query_side_effect(model_class):
+            mock_query = Mock()
+            if model_class.__name__ == 'Ticker':
+                mock_query.filter_by.return_value.first.return_value = mock_ticker
+            elif model_class.__name__ == 'MarketData':
+                mock_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+            elif model_class.__name__ == 'Fundamental':
+                mock_query.filter.return_value.order_by.return_value.first.return_value = None
+            elif model_class.__name__ == 'News':
+                mock_query.filter.return_value.order_by.return_value.all.return_value = []
+            elif model_class.__name__ == 'MacroFeature':
+                mock_query.filter.return_value.order_by.return_value.first.return_value = None
+            elif model_class.__name__ == 'InsiderTransaction':
+                mock_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_insider_data
+            return mock_query
+
+        self.mock_session.query.side_effect = query_side_effect
+
         # Test the method
         result = self.orchestrator.get_data_for_date("AAPL", date(2024, 1, 15))
-        
+
         # Verify insider transactions are included
         self.assertIn("insider_transactions", result)
         self.assertEqual(len(result["insider_transactions"]), 20)

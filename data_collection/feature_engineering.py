@@ -252,12 +252,10 @@ class FeatureEngineer:
                 .first()
 
             if fund_record:
-                fund_record.revenue_qoq_change = row.get('revenue_qoq')
-                fund_record.net_income_qoq_change = row.get('net_income_qoq')
-                fund_record.operating_income_qoq_change = row.get('operating_income_qoq')
-                fund_record.revenue_yoy_change = row.get('revenue_yoy')
-                fund_record.net_income_yoy_change = row.get('net_income_yoy')
-                fund_record.operating_income_yoy_change = row.get('operating_income_yoy')
+                fund_record.revenue_qoq_pct = row.get('revenue_qoq')
+                fund_record.net_income_qoq_pct = row.get('net_income_qoq')
+                fund_record.revenue_yoy_pct = row.get('revenue_yoy')
+                fund_record.net_income_yoy_pct = row.get('net_income_yoy')
 
     def _calculate_event_features(self, session, ticker_id: int, start_date: str, end_date: str) -> None:
         """

@@ -15,7 +15,9 @@ from data_collection.data_orchestrator import DataOrchestrator
 from thesis_generation.prompt_builder import CumulativePromptBuilder
 from thesis_generation.enhanced_prompt_builder import EnhancedCumulativePromptBuilder
 from thesis_generation.data_deduplicator import DataDeduplicator
-from thesis_generation.fireworks_client import FireworksDeepSeekClient
+from thesis_generation.context_compressor import ContextCompressor
+from thesis_generation.llm_factory import create_llm_client
+from rlvr.position_creator import create_position_after_thesis
 from utils.logger import setup_logger
 
 # Set up logging
@@ -32,26 +34,52 @@ class FireworksCharliePipeline:
         """Initialize pipeline components"""
         # Log configuration
         config.log_configuration(logger)
-        
+
         # Initialize components
         self.market_calendar = MarketCalendar(config.MARKET_CALENDAR)
         self.checkpoint_manager = CheckpointManager(config.CHECKPOINT_DIR)
         self.data_orchestrator = DataOrchestrator(config)
+
+        # Initialize shared database manager (reuse across all operations)
+        from data_collection.database_manager import DatabaseManager
+        self.db_manager = DatabaseManager(config.DB_URL)
+        logger.info("Shared DatabaseManager initialized for pipeline")
+
+        # Initialize context compression
+        self.context_compressor = ContextCompressor(
+            max_days_recent=config.MAX_DAYS_RECENT,
+            max_days_medium=config.MAX_DAYS_MEDIUM,
+            max_days_historical=config.MAX_DAYS_HISTORICAL
+        )
         
-        # Initialize Fireworks LLM client
-        if config.FIREWORKS_API_KEY:
-            self.llm_client = FireworksDeepSeekClient(
-                api_key=config.FIREWORKS_API_KEY,
-                model_name=config.MODEL_NAME,
-                model_mode=config.MODEL_MODE,
-                max_tokens=config.MAX_TOKENS,
-                temperature=config.TEMPERATURE
-            )
-            # Test connection
-            if not self.llm_client.test_connection():
-                logger.warning("Fireworks API connection test failed")
+        # Initialize LLM client using factory pattern
+        provider = config.LLM_PROVIDER
+        api_key_available = False
+
+        if provider == "deepseek":
+            api_key_available = bool(config.DEEPSEEK_API_KEY)
+            key_name = "DEEPSEEK_API_KEY"
+        elif provider == "fireworks":
+            api_key_available = bool(config.FIREWORKS_API_KEY)
+            key_name = "FIREWORKS_API_KEY"
         else:
-            logger.warning("No Fireworks API key provided - thesis generation disabled")
+            logger.error(f"Unknown LLM provider: {provider}")
+            self.llm_client = None
+            api_key_available = False
+
+        if api_key_available:
+            try:
+                logger.info(f"Initializing LLM client with provider: {provider}")
+                self.llm_client = create_llm_client(provider, config)
+
+                # Test connection
+                if not self.llm_client.test_connection():
+                    logger.warning(f"{provider.capitalize()} API connection test failed")
+            except Exception as e:
+                logger.error(f"Failed to initialize LLM client: {e}")
+                self.llm_client = None
+        else:
+            logger.warning(f"No {key_name} provided - thesis generation disabled")
             self.llm_client = None
         
         # Thread pool for parallel processing
@@ -238,18 +266,39 @@ class FireworksCharliePipeline:
                 
                 # Add to cumulative data
                 cumulative_data.append(day_data)
-                
+
+                # Apply context compression if enabled
+                if config.ENABLE_AGGRESSIVE_COMPRESSION:
+                    compressed_data = self.context_compressor.compress_cumulative_data(
+                        ticker=ticker,
+                        cumulative_data=cumulative_data,
+                        current_date=trading_day
+                    )
+                else:
+                    compressed_data = cumulative_data
+
                 # Build RLVR prompts (system and user)
                 logger.debug(f"Building RLVR prompts for {ticker} on {trading_day}")
                 system_prompt, user_prompt = prompt_builder.build_cumulative_prompt_messages(
                     ticker,
-                    cumulative_data,
+                    compressed_data,
                     response_format="json"
                 )
-                
+
                 # Enhanced token monitoring
                 estimated_tokens = (len(system_prompt) + len(user_prompt)) // 4
-                
+
+                # Log compression effectiveness
+                if config.ENABLE_AGGRESSIVE_COMPRESSION:
+                    original_size = len(str(cumulative_data)) // 4
+                    compressed_size = estimated_tokens
+                    compression_ratio = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
+                    logger.info(
+                        f"{ticker} on {trading_day}: "
+                        f"Compressed {len(cumulative_data)} days → {len(compressed_data)} items "
+                        f"({original_size:,} → {compressed_size:,} tokens, {compression_ratio:.1f}% reduction)"
+                    )
+
                 if estimated_tokens > config.TOKEN_BUDGET:
                     logger.error(
                         f"Prompt for {ticker} on {trading_day} exceeds token budget "
@@ -279,11 +328,10 @@ class FireworksCharliePipeline:
                     
                     if thesis_result["status"] == "success":
                         # Save to database and checkpoint
+                        session = None
                         try:
-                            # Store in database
-                            from data_collection.database_manager import DatabaseManager
-                            db_manager = DatabaseManager(config.DB_URL)
-                            session = db_manager.get_session()
+                            # Store in database using shared db_manager
+                            session = self.db_manager.get_session()
 
                             # Insert thesis generation
                             from data_collection.database_manager import ThesisGeneration
@@ -314,7 +362,7 @@ class FireworksCharliePipeline:
                                 }
 
                             thesis_gen = ThesisGeneration(
-                                ticker_id=db_manager.get_ticker_id(session, ticker),
+                                ticker_id=self.db_manager.get_ticker_id(session, ticker),
                                 as_of_date=trading_day,
                                 system_prompt=system_prompt,
                                 user_prompt=user_prompt,
@@ -327,6 +375,26 @@ class FireworksCharliePipeline:
                             )
                             session.add(thesis_gen)
                             session.commit()
+
+                            # Create position record for this thesis
+                            thesis_id = thesis_gen.thesis_id
+                            ticker_db_id = self.db_manager.get_ticker_id(session, ticker)
+
+                            position_id = create_position_after_thesis(
+                                db_session=session,
+                                thesis_id=thesis_id,
+                                ticker_id=ticker_db_id,
+                                entry_date=trading_day,
+                                predicted_action=thesis_result.get("action", "hold")
+                            )
+
+                            if position_id:
+                                logger.debug(f"Created position {position_id} for thesis {thesis_id}")
+                            else:
+                                logger.debug(
+                                    f"Position not created for thesis {thesis_id} "
+                                    f"(likely insufficient future data)"
+                                )
 
                             # Add prompt to checkpoint (also convert dates)
                             checkpoint_assistant_response = thesis_result.get("assistant_response")
@@ -341,8 +409,6 @@ class FireworksCharliePipeline:
                                 assistant_response=checkpoint_assistant_response
                             )
 
-                            session.close()
-
                             theses_generated += 1
                             logger.info(
                                 f"Generated thesis for {ticker} on {trading_day}: "
@@ -352,10 +418,15 @@ class FireworksCharliePipeline:
                         except Exception as e:
                             logger.error(f"Failed to save thesis to database: {e}")
                             logger.debug(traceback.format_exc())
+                            if session:
+                                session.rollback()
                             errors.append({
                                 "date": trading_day.isoformat(),  # Convert date to string!
                                 "error": f"Database save failed: {str(e)}"
                             })
+                        finally:
+                            if session:
+                                session.close()
                     else:
                         # LLM generation failed
                         error_msg = thesis_result.get("error", "Unknown LLM error")
@@ -394,28 +465,29 @@ class FireworksCharliePipeline:
                 })
         
         # Get final statistics from database
+        session = None
         try:
-            from data_collection.database_manager import DatabaseManager
-            db_manager = DatabaseManager(config.DB_URL)
-            session = db_manager.get_session()
-            
+            session = self.db_manager.get_session()
+
             # Count theses for this ticker
             from data_collection.database_manager import ThesisGeneration
             from sqlalchemy import func
             total_theses = session.query(func.count(ThesisGeneration.thesis_id)).filter(
-                ThesisGeneration.ticker_id == db_manager.get_ticker_id(session, ticker)
+                ThesisGeneration.ticker_id == self.db_manager.get_ticker_id(session, ticker)
             ).scalar() or 0
-            
+
             # Get latest thesis
             latest_thesis = session.query(ThesisGeneration).filter(
-                ThesisGeneration.ticker_id == db_manager.get_ticker_id(session, ticker)
+                ThesisGeneration.ticker_id == self.db_manager.get_ticker_id(session, ticker)
             ).order_by(ThesisGeneration.generated_at.desc()).first()
-            
-            session.close()
+
         except Exception as e:
             logger.error(f"Failed to get thesis statistics: {e}")
             total_theses = 0
             latest_thesis = None
+        finally:
+            if session:
+                session.close()
 
         # Determine status
         if already_complete:
@@ -446,7 +518,12 @@ class FireworksCharliePipeline:
         """Clean up resources"""
         logger.info("Shutting down pipeline")
         self.executor.shutdown(wait=True)
-        
+
+        # Dispose database engine to release all connections
+        if hasattr(self, 'db_manager') and self.db_manager:
+            logger.info("Disposing database engine and releasing connections")
+            self.db_manager.engine.dispose()
+
         # Clean old checkpoints
         deleted = self.checkpoint_manager.clean_old_checkpoints(days_to_keep=7)
         if deleted > 0:

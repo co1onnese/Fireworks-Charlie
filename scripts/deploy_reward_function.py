@@ -94,33 +94,60 @@ def deploy_reward_function():
             logger.error(f"✗ Reward function test failed: {result.reason}")
             return False
 
-        # Step 2: Deploy to Fireworks AI using reward-kit
+        # Step 2: Deploy to Fireworks AI using reward-kit CLI
         logger.info("Step 2: Deploying reward function to Fireworks AI...")
 
         try:
-            # Deploy using reward-kit's built-in deployment
-            evaluation_id = stock_prediction_reward.deploy(
-                name=config.EVALUATOR_NAME,
-                display_name=config.EVALUATOR_NAME,
-                force=True  # Overwrite if exists
+            import subprocess
+            import sys
+
+            # Build the deploy command using reward-kit CLI
+            deploy_cmd = [
+                sys.executable, "-m", "reward_kit", "deploy",
+                "--id", config.EVALUATOR_ID,
+                "--metrics-folders", f"stock_prediction={os.path.join(os.getcwd(), 'rlvr')}",
+                "--display-name", config.EVALUATOR_NAME,
+                "--force"
+            ]
+
+            logger.info(f"Running deployment command: {' '.join(deploy_cmd)}")
+
+            # Run the deployment
+            result = subprocess.run(
+                deploy_cmd,
+                cwd="/opt/Fireworks-Charlie",
+                capture_output=True,
+                text=True,
+                timeout=60
             )
 
-            logger.info(f"✓ Reward function deployed successfully!")
-            logger.info(f"Evaluation ID: {evaluation_id}")
-            logger.info(f"Evaluator Name: {config.EVALUATOR_NAME}")
+            if result.returncode == 0:
+                logger.info(f"✓ Reward function deployed successfully!")
+                logger.info(f"Evaluator ID: {config.EVALUATOR_ID}")
+                logger.info(f"Evaluator Name: {config.EVALUATOR_NAME}")
+                logger.info(f"Deployment output:\n{result.stdout}")
+            else:
+                logger.error(f"✗ Deployment failed with exit code {result.returncode}")
+                logger.error(f"STDOUT: {result.stdout}")
+                logger.error(f"STDERR: {result.stderr}")
 
-            # Store the evaluation_id for training use
-            # Note: Update config.EVALUATOR_ID if needed
-            if hasattr(config, 'update_evaluator_id'):
-                config.update_evaluator_id(evaluation_id)
+                # Provide manual deployment instructions
+                logger.info("\n" + "="*60)
+                logger.info("MANUAL DEPLOYMENT INSTRUCTIONS:")
+                logger.info("="*60)
+                logger.info(f"1. Use the reward-kit CLI command:")
+                logger.info(f"   reward-kit deploy --id {config.EVALUATOR_ID} \\")
+                logger.info(f"     --function-ref rlvr.reward_function:stock_prediction_reward \\")
+                logger.info(f"     --force")
+                logger.info(f"2. Or use the Fireworks AI web dashboard to upload the function")
+                logger.info(f"3. Reward function location: rlvr/reward_function.py")
+                logger.info("="*60)
 
-        except AttributeError as e:
-            logger.error(f"Deployment method not available: {e}")
-            logger.error("This may indicate reward-kit is not properly installed or configured")
-            logger.info("✓ Local testing successful - manual deployment required")
-            logger.info(f"Use evaluator name: {config.EVALUATOR_NAME}")
-            logger.info(f"Reward function location: rlvr/reward_function.py")
-            return True  # Return True since local test passed
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error("Deployment timed out after 60 seconds")
+            return False
 
         except Exception as e:
             logger.error(f"Deployment failed: {e}")

@@ -202,69 +202,115 @@ Focus on generating the most comprehensive and actionable investment thesis poss
     def _build_detailed_recent_section(self, ticker: str, recent_data: List[Dict[str, Any]]) -> List[str]:
         """Build detailed recent data section"""
         sections = []
-        
+
+        # Filter out compressed summaries from recent data
+        daily_data = [d for d in recent_data if d.get('type') not in ['weekly_summary', 'historical_insights']]
+
         # Technical Analysis (Detailed)
         sections.append("**TECHNICAL ANALYSIS (Recent)**")
-        sections.extend(self._build_detailed_technical_analysis(ticker, recent_data))
+        sections.extend(self._build_detailed_technical_analysis(ticker, daily_data))
         sections.append("")
-        
+
         # News Analysis (Detailed)
         sections.append("**NEWS & SENTIMENT (Recent)**")
-        sections.extend(self._build_detailed_news_analysis(ticker, recent_data))
+        sections.extend(self._build_detailed_news_analysis(ticker, daily_data))
         sections.append("")
-        
+
         # Fundamentals (Latest)
         sections.append("**FUNDAMENTALS (Latest)**")
-        sections.extend(self._build_detailed_fundamentals(ticker, recent_data))
+        sections.extend(self._build_detailed_fundamentals(ticker, daily_data))
         sections.append("")
-        
+
         # Insider Transactions (Recent)
         sections.append("**INSIDER ACTIVITY (Recent)**")
-        sections.extend(self._build_detailed_insider_analysis(ticker, recent_data))
+        sections.extend(self._build_detailed_insider_analysis(ticker, daily_data))
         sections.append("")
-        
+
         return sections
     
     def _build_summarized_medium_section(self, ticker: str, medium_data: List[Dict[str, Any]]) -> List[str]:
         """Build summarized medium-term data section"""
         sections = []
-        
-        # Weekly technical summaries
-        sections.append("**TECHNICAL TRENDS (Medium-term)**")
-        sections.extend(self._build_weekly_technical_summaries(medium_data))
-        sections.append("")
-        
-        # News sentiment trends
-        sections.append("**NEWS SENTIMENT TRENDS**")
-        sections.extend(self._build_news_sentiment_trends(medium_data))
-        sections.append("")
-        
-        # Macro environment
+
+        # Separate weekly summaries from daily data
+        weekly_summaries = [d for d in medium_data if d.get('type') == 'weekly_summary']
+        daily_data = [d for d in medium_data if d.get('type') not in ['weekly_summary', 'historical_insights']]
+
+        # If we have pre-computed weekly summaries, use them
+        if weekly_summaries:
+            sections.append("**TECHNICAL TRENDS (Medium-term) - Weekly Summaries**")
+            for week in weekly_summaries:
+                sections.append(f"  Week of {week['date_range']}: {week.get('days_in_week', 0)} trading days")
+                if week.get('technical'):
+                    tech = week['technical'][0] if isinstance(week['technical'], list) else week['technical']
+                    sections.append(
+                        f"    Price: ${tech.get('open', 0):.2f} → ${tech.get('close', 0):.2f} "
+                        f"({tech.get('week_change_pct', 0):+.2f}%), "
+                        f"Range: ${tech.get('low', 0):.2f}-${tech.get('high', 0):.2f}"
+                    )
+                if week.get('news'):
+                    news = week['news'][0] if isinstance(week['news'], list) else week['news']
+                    sections.append(
+                        f"    News: {news.get('total_articles', 0)} articles, "
+                        f"Sentiment: {news.get('sentiment_label', 'neutral')} ({news.get('avg_sentiment', 0):.2f})"
+                    )
+            sections.append("")
+        else:
+            # Fall back to original weekly summarization
+            sections.append("**TECHNICAL TRENDS (Medium-term)**")
+            sections.extend(self._build_weekly_technical_summaries(daily_data))
+            sections.append("")
+
+            sections.append("**NEWS SENTIMENT TRENDS**")
+            sections.extend(self._build_news_sentiment_trends(daily_data))
+            sections.append("")
+
+        # Macro environment (from most recent data point)
         sections.append("**MACROECONOMIC ENVIRONMENT**")
-        sections.extend(self._build_macro_summary(medium_data))
+        all_data = weekly_summaries + daily_data
+        sections.extend(self._build_macro_summary(all_data))
         sections.append("")
-        
+
         return sections
     
     def _build_historical_insights_section(self, ticker: str, historical_data: List[Dict[str, Any]]) -> List[str]:
         """Build historical insights section"""
         sections = []
-        
-        # Key price levels and patterns
-        sections.append("**KEY PRICE LEVELS & PATTERNS**")
-        sections.extend(self._build_price_levels_analysis(historical_data))
-        sections.append("")
-        
-        # Long-term trends
-        sections.append("**LONG-TERM TRENDS**")
-        sections.extend(self._build_long_term_trends(historical_data))
-        sections.append("")
-        
-        # Historical volatility
-        sections.append("**HISTORICAL VOLATILITY**")
-        sections.extend(self._build_volatility_analysis(historical_data))
-        sections.append("")
-        
+
+        # Check if we have pre-computed insights
+        insights = [d for d in historical_data if d.get('type') == 'historical_insights']
+
+        if insights:
+            # Use pre-computed insights
+            sections.append("**HISTORICAL INSIGHTS (Pre-Computed)**")
+            for insight in insights:
+                sections.append(f"  Period: {insight.get('date_range', 'N/A')} ({insight.get('days_covered', 0)} days)")
+                sections.append(f"  Price Range: ${insight.get('price_range_low', 0):.2f} - ${insight.get('price_range_high', 0):.2f} ({insight.get('price_range_pct', 0):.1f}% range)")
+                sections.append(f"  Total Return: {insight.get('total_return_pct', 0):+.2f}%")
+                sections.append(f"  Trend: {insight.get('trend', 'unknown')}")
+                sections.append(f"  Avg Daily Return: {insight.get('avg_daily_return_pct', 0):+.2f}%")
+                sections.append(f"  Daily Volatility: {insight.get('daily_volatility_pct', 0):.2f}%")
+            sections.append("")
+        else:
+            # Fall back to computing insights from raw data
+            daily_data = [d for d in historical_data if d.get('type') not in ['weekly_summary', 'historical_insights']]
+
+            if daily_data:
+                # Key price levels and patterns
+                sections.append("**KEY PRICE LEVELS & PATTERNS**")
+                sections.extend(self._build_price_levels_analysis(daily_data))
+                sections.append("")
+
+                # Long-term trends
+                sections.append("**LONG-TERM TRENDS**")
+                sections.extend(self._build_long_term_trends(daily_data))
+                sections.append("")
+
+                # Historical volatility
+                sections.append("**HISTORICAL VOLATILITY**")
+                sections.extend(self._build_volatility_analysis(daily_data))
+                sections.append("")
+
         return sections
     
     def _build_detailed_technical_analysis(self, ticker: str, data: List[Dict[str, Any]]) -> List[str]:

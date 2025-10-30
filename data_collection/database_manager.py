@@ -624,6 +624,9 @@ class DatabaseManager:
             echo=echo,
             pool_pre_ping=True,  # Verify connections before using
             pool_recycle=3600,  # Recycle connections after 1 hour
+            pool_size=5,  # Maximum number of permanent connections
+            max_overflow=5,  # Maximum number of temporary connections (total max = 10)
+            pool_timeout=30,  # Timeout for getting connection from pool
         )
         self.Session = sessionmaker(bind=self.engine)
         logger.info(f"DatabaseManager initialized with engine: {db_url.split('@')[1] if '@' in db_url else 'configured'}")
@@ -775,20 +778,30 @@ class DatabaseManager:
     ) -> None:
         """Insert news data for a ticker"""
         for news_item in news_data:
-            # Check if news already exists (by headline and date)
-            existing = session.query(News).filter(
-                News.ticker_id == ticker_id,
-                News.headline == news_item['headline'],
-                News.published_at == news_item['published_at']
-            ).first()
-            
+            # Check if news already exists by URL (since URL has unique constraint)
+            # or by ticker_id + headline + date combination
+            url = news_item.get('url')
+            existing = None
+
+            if url:
+                # First check if URL already exists (most reliable check)
+                existing = session.query(News).filter(News.url == url).first()
+
+            if not existing:
+                # Also check by ticker + headline + date (for articles without URL)
+                existing = session.query(News).filter(
+                    News.ticker_id == ticker_id,
+                    News.headline == news_item['headline'],
+                    News.published_at == news_item['published_at']
+                ).first()
+
             if not existing:
                 news_record = News(
                     ticker_id=ticker_id,
                     headline=news_item['headline'],
                     summary=news_item.get('summary'),
                     content=news_item.get('content'),
-                    url=news_item.get('url'),
+                    url=url,
                     published_at=news_item['published_at'],
                     source=news_item.get('source'),
                     sentiment_score=news_item.get('sentiment_score')
@@ -796,7 +809,7 @@ class DatabaseManager:
                 session.add(news_record)
                 logger.debug(f"Inserted news for ticker {ticker_id}: {news_item['headline'][:50]}...")
             else:
-                logger.debug(f"News for ticker {ticker_id} already exists: {news_item['headline'][:50]}...")
+                logger.debug(f"News already exists (URL or headline duplicate): {news_item['headline'][:50]}...")
 
     def insert_fundamental_data(
         self,
