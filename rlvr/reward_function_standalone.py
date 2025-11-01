@@ -51,12 +51,12 @@ def stock_prediction_reward(
     try:
         # Extract assistant response from messages
         assistant_response = _extract_assistant_response(messages)
-        if not assistant_response:
-            return _create_error_result("No assistant response found in messages")
-        
+        if not assistant_response or not assistant_response.strip():
+            return _create_error_result("No assistant response found in messages or empty response")
+
         # Parse JSON response
         try:
-            response_data = json.loads(assistant_response)
+            response_data = json.loads(assistant_response.strip())
         except json.JSONDecodeError as e:
             return _create_error_result(f"Invalid JSON in assistant response: {str(e)}")
         
