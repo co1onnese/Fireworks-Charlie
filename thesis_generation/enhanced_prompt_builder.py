@@ -244,7 +244,7 @@ Focus on generating the most comprehensive and actionable investment thesis poss
                 if week.get('technical'):
                     tech = week['technical'][0] if isinstance(week['technical'], list) else week['technical']
                     sections.append(
-                        f"    Price: ${tech.get('open', 0):.2f} → ${tech.get('close', 0):.2f} "
+                        f"    Price: ${tech.get('open', 0):.2f} ? ${tech.get('close', 0):.2f} "
                         f"({tech.get('week_change_pct', 0):+.2f}%), "
                         f"Range: ${tech.get('low', 0):.2f}-${tech.get('high', 0):.2f}"
                     )
@@ -351,12 +351,22 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         
         # Collect all news
         all_news = []
+        days_with_news = 0
+        days_checked = len(data)
+        
         for day_data in data:
             if day_data.get('news'):
                 all_news.extend(day_data['news'])
+                if day_data['news']:  # If not empty list
+                    days_with_news += 1
         
         if not all_news:
-            sections.append("No recent news available")
+            # Provide more diagnostic context
+            sections.append(
+                f"No news articles available in this period.\n"
+                f"    Note: Checked {days_checked} trading days, found news on {days_with_news} days.\n"
+                f"    This may indicate limited media coverage for {ticker} during this timeframe."
+            )
             return sections
         
         # Group by sentiment

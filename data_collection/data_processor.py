@@ -264,13 +264,18 @@ class DataProcessor:
         Expected raw_data format: [{'date': 'YYYY-MM-DD HH:MM:SS', 'title': ..., 'content': ..., 'sentiment': ..., 'link': ...}]
         """
         if not raw_data:
+            logger.debug(f"No raw news data to process for {symbol}")
             return []
+
+        initial_count = len(raw_data)
+        logger.debug(f"Processing {initial_count} raw news articles for {symbol}")
 
         df = pd.DataFrame(raw_data)
         df["symbol"] = symbol.split(".")[0].upper()
         df = df.rename(columns={"link": "url", "date": "published_at", "title": "headline"})
         df["published_at"] = pd.to_datetime(df["published_at"])
-        # Extract sentiment polarity score (raw -100 to +100) and categorical sentiment
+        
+        # Extract sentiment polarity score (raw -1.0 to +1.0) and categorical sentiment
         df["sentiment_score"] = df["sentiment"].apply(
             lambda x: x.get("polarity") if isinstance(x, dict) and x.get("polarity") is not None else None
         )
@@ -291,7 +296,16 @@ class DataProcessor:
         df["date"] = df["published_at"].dt.date  # Extract date part for filtering
 
         # Filter by date and ticker
+        pre_filter_count = len(df)
         df = self._filter_by_date_and_ticker(df, "date", "symbol")
+        post_filter_count = len(df)
+        
+        if pre_filter_count > post_filter_count:
+            filtered_out = pre_filter_count - post_filter_count
+            logger.info(
+                f"Filtered out {filtered_out} news articles for {symbol} "
+                f"(outside date range {self.start_date.date()} to {self.end_date.date()})"
+            )
 
         # Select and reorder columns to match DB schema
         columns = ["symbol", "published_at", "headline", "content", "sentiment", "sentiment_score", "sentiment_label", "url"]
@@ -300,6 +314,12 @@ class DataProcessor:
         df = df.replace({np.nan: None})
 
         processed_data = df[columns].to_dict(orient="records")
+        
+        logger.info(
+            f"Successfully processed {len(processed_data)} news articles for {symbol} "
+            f"(from {initial_count} raw articles)"
+        )
+        
         return processed_data
 
     def process_insider_transactions(self, raw_data: list, symbol: str) -> list:

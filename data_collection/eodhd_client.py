@@ -147,16 +147,55 @@ class EODHDClient:
         return {}
 
     def get_news(
-        self, symbol: str, start_date: str, end_date: str
+        self, symbol: str, start_date: str, end_date: str, limit: int = 1000
     ) -> List[Dict[str, Any]]:
-        """Fetches Financial News Feed and Stock News Sentiment data."""
+        """
+        Fetches Financial News Feed and Stock News Sentiment data.
+        
+        Args:
+            symbol: Stock ticker symbol (e.g., AAPL.US)
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            limit: Maximum number of articles to fetch (default: 1000, max: 1000)
+            
+        Returns:
+            List of news articles with sentiment data
+            
+        Note:
+            EODHD API defaults to 50 articles if limit is not specified.
+            For comprehensive news coverage, always specify a limit.
+        """
         endpoint = "news"
-        params = {"s": symbol, "from": start_date, "to": end_date}
+        params = {
+            "s": symbol,
+            "from": start_date,
+            "to": end_date,
+            "limit": min(limit, 1000),  # EODHD max is 1000
+            "offset": 0,
+            "fmt": "json"
+        }
+        
+        logger.info(f"Fetching news for {symbol} from {start_date} to {end_date} (limit: {params['limit']})")
+        
         response = self._make_request(endpoint, params)
+        
         if isinstance(response, list):
+            logger.info(f"Successfully fetched {len(response)} news articles for {symbol}")
+            
+            # If we got exactly 1000 articles, there might be more
+            if len(response) == 1000:
+                logger.warning(
+                    f"Fetched maximum 1000 articles for {symbol}. "
+                    "There may be more articles available. Consider using pagination or narrower date ranges."
+                )
+            
             return response
-        logger.error("Expected list response for news, received dict.")
-        return []
+        elif isinstance(response, dict):
+            logger.error(f"Unexpected dict response for news API: {response}")
+            return []
+        else:
+            logger.warning(f"No news data returned for {symbol} from {start_date} to {end_date}")
+            return []
 
     def get_insider_transactions(
         self, symbol: str, start_date: str, end_date: str

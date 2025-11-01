@@ -119,19 +119,38 @@ class DataOrchestrator:
             
             # 4. Fetch and process News
             if self.eodhd_client:
+                logger.info(f"Fetching news for {ticker} from {start_date} to {end_date}")
+                
                 news_raw = self.eodhd_client.get_news(
                     f"{ticker}.US", 
                     start_date.strftime("%Y-%m-%d"), 
-                    end_date.strftime("%Y-%m-%d")
+                    end_date.strftime("%Y-%m-%d"),
+                    limit=1000  # Explicitly request up to 1000 articles (EODHD max)
                 )
+                
+                if not news_raw:
+                    logger.warning(
+                        f"No news data returned from API for {ticker}. "
+                        f"This could indicate: (1) No news published in period, "
+                        f"(2) API returned empty response, or (3) Date range has no coverage."
+                    )
+                else:
+                    logger.info(f"Raw news API returned {len(news_raw)} articles for {ticker}")
+                
                 news_processed = processor.process_news(news_raw, f"{ticker}.US")
                 
-                # Add ticker_id to each article for the insert method
-                for article in news_processed:
-                    article["ticker_id"] = ticker_obj.ticker_id
-                self.db_manager.insert_news(session, news_processed)
-                session.commit()
-                logger.info(f"Stored {len(news_processed)} news articles")
+                if news_processed:
+                    logger.info(f"Processed {len(news_processed)} news articles after filtering for {ticker}")
+                    
+                    # Add ticker_id to each article for the insert method
+                    for article in news_processed:
+                        article["ticker_id"] = ticker_obj.ticker_id
+                    
+                    self.db_manager.insert_news(session, news_processed)
+                    session.commit()
+                    logger.info(f"Successfully stored {len(news_processed)} news articles in database for {ticker}")
+                else:
+                    logger.warning(f"No news articles passed filtering/processing for {ticker}")
             
             # 5. Fetch and process Insider Transactions
             if self.eodhd_client:
@@ -309,7 +328,7 @@ class DataOrchestrator:
             ).limit(90).all()  # Get last 90 days
             
             # Get latest fundamentals
-            from .database_manager import Fundamental, News, MacroFeatures
+            from .database_manager import Fundamental, News, MacroFeature
             fundamentals = session.query(Fundamental).filter(
                 Fundamental.ticker_id == ticker_obj.ticker_id,
                 Fundamental.filing_date <= as_of_date
