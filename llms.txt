@@ -388,7 +388,7 @@ ConfigManager (config_manager.py:14-300+)
   - Model Config: MAX_TOKENS, TEMPERATURE (must be > 0 for GRPO)
   - GRPO: GRPO_NUM_RESPONSES, GRPO_EPOCHS, GRPO_LEARNING_RATE, GRPO_LORA_RANK
   - Generation: GEN_TEMPERATURE, GEN_TOP_P, GEN_TOP_K, GEN_MAX_TOKENS
-  - Pipeline: START_DATE, END_DATE, TICKERS, PARALLEL_WORKERS
+  - Pipeline: START_DATE, END_DATE, TICKERS
   - Reward: DIRECTIONAL_ACCURACY_WEIGHT, SHARPE_RATIO_WEIGHT
   - RLVR: RLVR_MODE, RLVR_OUTPUT_DIR, EVALUATOR_ID, EVALUATOR_NAME
   Methods:
@@ -951,7 +951,7 @@ Environment Variables (.env):
 • Fireworks AI: FIREWORKS_API_KEY, FIREWORKS_ACCOUNT_ID, MODEL_NAME
 • DeepSeek: DEEPSEEK_API_KEY, DEEPSEEK_MODEL, DEEPSEEK_BASE_URL
 • Data Sources: EODHD_API_KEY, FRED_API_KEY, FINNHUB_API_KEY, FMP_API_KEY
-• Pipeline: TICKERS, START_DATE, END_DATE, PARALLEL_WORKERS
+• Pipeline: TICKERS, START_DATE, END_DATE
 • LLM Config: MAX_TOKENS, TEMPERATURE (must be > 0 for GRPO)
 • GRPO Training: GRPO_NUM_RESPONSES, GRPO_EPOCHS, GRPO_LEARNING_RATE
 • Reward Weights: DIRECTIONAL_ACCURACY_WEIGHT, SHARPE_RATIO_WEIGHT
@@ -1147,7 +1147,7 @@ Maintenance Guidelines:
 6. Weekly: Performance monitoring review
 
 Scaling Considerations:
-• Horizontal: Increase PARALLEL_WORKERS for more tickers
+• Horizontal: Automatically scales - 1 worker per ticker for parallel processing
 • Database: Partition by ticker for massive datasets
 • Distributed: Celery workers for distributed processing
 • CDN: Cache FRED data and fundamentals

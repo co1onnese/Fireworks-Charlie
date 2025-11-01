@@ -27,7 +27,6 @@ class TestPipelineIntegration(unittest.TestCase):
         mock_config.END_DATE = "2024-01-31"
         mock_config.TOKEN_BUDGET = 200000
         mock_config.TOKEN_WARNING_THRESHOLD = 180000
-        mock_config.PARALLEL_WORKERS = 1
         mock_config.CHECKPOINT_INTERVAL = 1
         mock_config.FIREWORKS_API_KEY = "test_key"
         mock_config.FIREWORKS_ACCOUNT_ID = "test_account"

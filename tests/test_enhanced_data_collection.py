@@ -21,7 +21,6 @@ class TestEnhancedDataCollection(unittest.TestCase):
         self.config.DB_URL = "postgresql://test:test@localhost/test_db"
         self.config.EODHD_API_KEY = "test_eodhd_key"
         self.config.FRED_API_KEY = "test_fred_key"
-        self.config.PARALLEL_WORKERS = 2
 
         # Setup mock database manager instance
         self.mock_db_manager = Mock()

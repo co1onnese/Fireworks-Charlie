@@ -272,10 +272,14 @@ class DataOrchestrator:
             Dictionary with feature engineering status
         """
         logger.info(f"Running feature engineering for {len(tickers)} tickers")
-        
+
+        # Use dynamic worker allocation - cap at 4 to avoid overwhelming database
+        num_workers = min(4, len(tickers))
+        logger.info(f"Using {num_workers} workers for feature engineering")
+
         feature_engineer = FeatureEngineer(
             self.db_manager,
-            max_workers=self.config.PARALLEL_WORKERS
+            max_workers=num_workers
         )
         
         try:
@@ -339,12 +343,27 @@ class DataOrchestrator:
             # Get news
             # Convert as_of_date to datetime for comparison with published_date
             as_of_datetime = datetime.combine(as_of_date, datetime.min.time()) if isinstance(as_of_date, date) and not isinstance(as_of_date, datetime) else as_of_date
+
+            # Optimized: Get recent news articles (30 days, limited to 100, weighted by confidence)
+            # Only include articles with sentiment scores
             news = session.query(News).filter(
                 News.ticker_id == ticker_obj.ticker_id,
                 News.published_at <= as_of_datetime,
-                News.published_at >= as_of_datetime - timedelta(days=60)
+                News.published_at >= as_of_datetime - timedelta(days=30),
+                News.sentiment_score.isnot(None)  # Only articles with sentiment
             ).order_by(
-                News.published_at.desc()
+                News.sentiment_confidence.desc(),  # High confidence first
+                News.published_at.desc()            # Then most recent
+            ).limit(100).all()  # Max 100 articles
+
+            # Get 7-day sentiment aggregates for trend context
+            from .database_manager import NewsSentimentFeature
+            sentiment_features = session.query(NewsSentimentFeature).filter(
+                NewsSentimentFeature.ticker_id == ticker_obj.ticker_id,
+                NewsSentimentFeature.date <= as_of_date,
+                NewsSentimentFeature.date >= as_of_date - timedelta(days=7)
+            ).order_by(
+                NewsSentimentFeature.date.desc()
             ).all()
             
             # Get macro features
@@ -370,6 +389,8 @@ class DataOrchestrator:
                 "technical": [self._serialize_technical(t) for t in technical_data],
                 "fundamentals": self._serialize_fundamentals(fundamentals) if fundamentals else None,
                 "news": [self._serialize_news(n) for n in news],
+                "news_sentiment_features": self._serialize_sentiment_features(sentiment_features),
+                "news_summary": self._build_news_summary(news, sentiment_features),
                 "macro_features": self._serialize_macro_features(macro_features) if macro_features else None,
                 "insider_transactions": [self._serialize_insider_transaction(t) for t in insider_transactions],
             }
@@ -419,15 +440,75 @@ class DataOrchestrator:
         }
     
     def _serialize_news(self, news) -> Dict[str, Any]:
-        """Serialize news record"""
+        """Serialize news record with full sentiment data"""
         return {
             "published_at": news.published_at,
             "headline": news.headline,
             "summary": news.content,
             "sentiment_score": float(news.sentiment_score) if news.sentiment_score else None,
             "sentiment_label": news.sentiment_label if hasattr(news, 'sentiment_label') else news.sentiment,
+            "sentiment_confidence": float(news.sentiment_confidence) if news.sentiment_confidence else 0.5,
+            "source": news.source,
+            "url": news.url
         }
-    
+
+    def _serialize_sentiment_features(self, features) -> List[Dict[str, Any]]:
+        """Serialize sentiment aggregates for trend analysis"""
+        return [
+            {
+                "date": f.date,
+                "sentiment_7day_avg": float(f.sentiment_7day_avg) if f.sentiment_7day_avg else 0.0,
+                "sentiment_7day_count": f.sentiment_7day_count,
+                "daily_article_count": f.daily_article_count
+            }
+            for f in features
+        ]
+
+    def _build_news_summary(self, news_list, sentiment_features) -> Dict[str, Any]:
+        """Build news sentiment summary for easy prompt inclusion"""
+        if not news_list:
+            return {
+                "total_articles": 0,
+                "sentiment_distribution": {"positive": 0, "negative": 0, "neutral": 0},
+                "avg_sentiment": 0.0,
+                "avg_confidence": 0.0,
+                "trend_direction": "neutral",
+                "recent_sentiment": 0.0
+            }
+
+        # Calculate distribution
+        positive = sum(1 for n in news_list if n.sentiment_label == "positive")
+        negative = sum(1 for n in news_list if n.sentiment_label == "negative")
+        neutral = sum(1 for n in news_list if n.sentiment_label == "neutral")
+
+        # Calculate averages
+        avg_sentiment = sum(float(n.sentiment_score) for n in news_list if n.sentiment_score) / len(news_list)
+        avg_confidence = sum(float(n.sentiment_confidence or 0.5) for n in news_list) / len(news_list)
+
+        # Determine trend from features
+        trend_direction = "neutral"
+        if len(sentiment_features) >= 2:
+            recent_avg = float(sentiment_features[0].sentiment_7day_avg or 0)
+            previous_avg = float(sentiment_features[1].sentiment_7day_avg or 0)
+            if recent_avg > previous_avg + 0.05:
+                trend_direction = "improving"
+            elif recent_avg < previous_avg - 0.05:
+                trend_direction = "declining"
+
+        return {
+            "total_articles": len(news_list),
+            "sentiment_distribution": {
+                "positive": positive,
+                "negative": negative,
+                "neutral": neutral
+            },
+            "avg_sentiment": round(avg_sentiment, 3),
+            "avg_confidence": round(avg_confidence, 3),
+            "trend_direction": trend_direction,
+            "recent_sentiment": float(sentiment_features[0].sentiment_7day_avg or 0) if sentiment_features else 0.0,
+            "articles_last_7_days": sum(f.daily_article_count for f in sentiment_features) if sentiment_features else 0
+        }
+
     def _serialize_macro_features(self, macro) -> Dict[str, Any]:
         """Serialize macro features record"""
         return {

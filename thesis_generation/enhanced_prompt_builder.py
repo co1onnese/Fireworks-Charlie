@@ -346,28 +346,67 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         return sections
     
     def _build_detailed_news_analysis(self, ticker: str, data: List[Dict[str, Any]]) -> List[str]:
-        """Build detailed news analysis section"""
+        """Build detailed news analysis section with sentiment overview and trends"""
         sections = []
-        
-        # Collect all news
+
+        # Get latest news summary from most recent day
+        latest_day = data[0] if data else {}
+        news_summary = latest_day.get('news_summary', {})
+
+        # Check if we have news data
         all_news = []
-        days_with_news = 0
-        days_checked = len(data)
-        
         for day_data in data:
             if day_data.get('news'):
                 all_news.extend(day_data['news'])
-                if day_data['news']:  # If not empty list
-                    days_with_news += 1
-        
+
         if not all_news:
-            # Provide more diagnostic context
             sections.append(
-                f"No news articles available in this period.\n"
-                f"    Note: Checked {days_checked} trading days, found news on {days_with_news} days.\n"
-                f"    This may indicate limited media coverage for {ticker} during this timeframe."
+                f"No news articles available in the last 30 days.\n"
+                f"    This may indicate limited media coverage for {ticker}."
             )
             return sections
+
+        # Display sentiment summary first
+        sections.append(f"**NEWS SENTIMENT OVERVIEW (Last 30 Days)**")
+        sections.append(f"  Total Articles: {news_summary.get('total_articles', 0)}")
+        avg_sentiment = news_summary.get('avg_sentiment', 0)
+        sentiment_desc = 'Positive' if avg_sentiment > 0.1 else 'Negative' if avg_sentiment < -0.1 else 'Neutral'
+        sections.append(f"  Average Sentiment: {avg_sentiment:.3f} ({sentiment_desc})")
+        sections.append(f"  Sentiment Confidence: {news_summary.get('avg_confidence', 0):.3f}")
+        sections.append(f"  Trend: {news_summary.get('trend_direction', 'neutral').title()}")
+
+        if news_summary.get('recent_sentiment'):
+            sections.append(f"  7-Day Average: {news_summary.get('recent_sentiment', 0):.3f}")
+        sections.append("")
+
+        # Sentiment distribution
+        dist = news_summary.get('sentiment_distribution', {})
+        sections.append(f"**SENTIMENT DISTRIBUTION**")
+        sections.append(f"  Positive: {dist.get('positive', 0)} articles")
+        sections.append(f"  Negative: {dist.get('negative', 0)} articles")
+        sections.append(f"  Neutral: {dist.get('neutral', 0)} articles")
+        sections.append("")
+
+        # Recent articles (weighted by confidence) - TOP 15
+        # Sort by confidence and recency
+        all_news.sort(key=lambda n: (n.get('sentiment_confidence', 0), str(n.get('published_at', ''))), reverse=True)
+
+        sections.append(f"**RECENT HEADLINES (Top {min(15, len(all_news))} by Confidence)**")
+        for news in all_news[:15]:  # Top 15 by confidence
+            sentiment_score = news.get('sentiment_score', 0)
+            confidence = news.get('sentiment_confidence', 0.5)
+            label = news.get('sentiment_label', 'neutral')
+
+            emoji = "📈" if sentiment_score > 0.1 else "📉" if sentiment_score < -0.1 else "➡️"
+            sections.append(f"  {emoji} [{label.upper()} {sentiment_score:.2f}, conf: {confidence:.2f}]")
+            sections.append(f"    {news.get('headline', 'No headline')}")
+            if news.get('source'):
+                sections.append(f"    Source: {news['source']}")
+
+        sections.append("")
+
+        return sections
+
         
         # Group by sentiment
         positive_news = [n for n in all_news if n.get('sentiment_score', 0) > 0.1]

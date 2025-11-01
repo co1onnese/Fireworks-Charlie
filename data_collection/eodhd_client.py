@@ -151,51 +151,68 @@ class EODHDClient:
     ) -> List[Dict[str, Any]]:
         """
         Fetches Financial News Feed and Stock News Sentiment data.
-        
+        Uses pagination to fetch ALL articles, not just the first 1000.
+
         Args:
             symbol: Stock ticker symbol (e.g., AAPL.US)
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
-            limit: Maximum number of articles to fetch (default: 1000, max: 1000)
-            
+            limit: Maximum number of articles to fetch (default: 1000, max: 1000 per request)
+
         Returns:
             List of news articles with sentiment data
-            
+
         Note:
-            EODHD API defaults to 50 articles if limit is not specified.
-            For comprehensive news coverage, always specify a limit.
+            EODHD API returns max 1000 articles per request.
+            This method uses pagination to fetch ALL articles in the date range.
         """
         endpoint = "news"
-        params = {
-            "s": symbol,
-            "from": start_date,
-            "to": end_date,
-            "limit": min(limit, 1000),  # EODHD max is 1000
-            "offset": 0,
-            "fmt": "json"
-        }
-        
-        logger.info(f"Fetching news for {symbol} from {start_date} to {end_date} (limit: {params['limit']})")
-        
-        response = self._make_request(endpoint, params)
-        
-        if isinstance(response, list):
-            logger.info(f"Successfully fetched {len(response)} news articles for {symbol}")
-            
-            # If we got exactly 1000 articles, there might be more
-            if len(response) == 1000:
-                logger.warning(
-                    f"Fetched maximum 1000 articles for {symbol}. "
-                    "There may be more articles available. Consider using pagination or narrower date ranges."
-                )
-            
-            return response
-        elif isinstance(response, dict):
-            logger.error(f"Unexpected dict response for news API: {response}")
-            return []
-        else:
-            logger.warning(f"No news data returned for {symbol} from {start_date} to {end_date}")
-            return []
+        all_articles = []
+        offset = 0
+        batch_size = 1000  # EODHD max is 1000
+
+        logger.info(f"Fetching ALL news for {symbol} from {start_date} to {end_date}")
+
+        while True:
+            params = {
+                "s": symbol,
+                "from": start_date,
+                "to": end_date,
+                "limit": batch_size,
+                "offset": offset,
+                "fmt": "json"
+            }
+
+            logger.info(f"Fetching batch {offset // batch_size + 1}: articles {offset} to {offset + batch_size}")
+
+            response = self._make_request(endpoint, params)
+
+            if isinstance(response, list):
+                batch_count = len(response)
+                logger.info(f"Batch {offset // batch_size + 1}: Retrieved {batch_count} articles")
+
+                all_articles.extend(response)
+
+                # If we got fewer than batch_size, we've reached the end
+                if batch_count < batch_size:
+                    logger.info(
+                        f"Completed fetching all news for {symbol}. "
+                        f"Total articles: {len(all_articles)}"
+                    )
+                    break
+                else:
+                    # We might have more articles, continue to next batch
+                    offset += batch_size
+            elif isinstance(response, dict):
+                logger.error(f"Unexpected dict response for news API: {response}")
+                logger.info(f"Returning {len(all_articles)} articles fetched so far")
+                break
+            else:
+                logger.warning(f"No news data returned for {symbol} from {start_date} to {end_date}")
+                logger.info(f"Returning {len(all_articles)} articles fetched so far")
+                break
+
+        return all_articles
 
     def get_insider_transactions(
         self, symbol: str, start_date: str, end_date: str

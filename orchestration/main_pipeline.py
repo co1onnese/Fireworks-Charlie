@@ -72,19 +72,17 @@ class FireworksCharliePipeline:
                 logger.info(f"Initializing LLM client with provider: {provider}")
                 self.llm_client = create_llm_client(provider, config)
 
-                # Test connection
-                if not self.llm_client.test_connection():
-                    logger.warning(f"{provider.capitalize()} API connection test failed")
+                # Test connection (disabled for now to avoid hanging)
+                # if not self.llm_client.test_connection():
+                #     logger.warning(f"{provider.capitalize()} API connection test failed")
+                logger.info(f"✓ LLM client initialized (connection test disabled)")
             except Exception as e:
                 logger.error(f"Failed to initialize LLM client: {e}")
                 self.llm_client = None
         else:
             logger.warning(f"No {key_name} provided - thesis generation disabled")
             self.llm_client = None
-        
-        # Thread pool for parallel processing
-        self.executor = ThreadPoolExecutor(max_workers=config.PARALLEL_WORKERS)
-        
+
         logger.info("FireworksCharliePipeline initialized successfully")
     
     def run(self, 
@@ -121,19 +119,11 @@ class FireworksCharliePipeline:
         
         # Then, process each ticker for thesis generation
         logger.info("Phase 2: Thesis Generation")
-        
-        # Submit all tickers for parallel processing
-        futures = []
-        for ticker in tickers:
-            future = self.executor.submit(
-                self._process_ticker,
-                ticker,
-                trading_days,
-                resume
-            )
-            futures.append((ticker, future))
-        
-        # Collect results
+
+        # Create executor with 1 worker per ticker for true parallelization
+        num_workers = len(tickers)
+        logger.info(f"Creating thread pool with {num_workers} workers (1 per ticker)")
+
         results = {
             "data_collection": data_collection_results,
             "thesis_generation": {},
@@ -143,25 +133,39 @@ class FireworksCharliePipeline:
                 "failures": 0
             }
         }
-        
-        for ticker, future in futures:
-            try:
-                ticker_result = future.result()
-                results["thesis_generation"][ticker] = ticker_result
-                
-                if ticker_result["status"] == "success":
-                    results["summary"]["tickers_processed"] += 1
-                    results["summary"]["total_theses"] += ticker_result["theses_generated"]
-                else:
+
+        # Process all tickers in parallel with dynamic worker allocation
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all tickers for parallel processing
+            futures = []
+            for ticker in tickers:
+                future = executor.submit(
+                    self._process_ticker,
+                    ticker,
+                    trading_days,
+                    resume
+                )
+                futures.append((ticker, future))
+
+            # Collect results
+            for ticker, future in futures:
+                try:
+                    ticker_result = future.result()
+                    results["thesis_generation"][ticker] = ticker_result
+
+                    if ticker_result["status"] == "success":
+                        results["summary"]["tickers_processed"] += 1
+                        results["summary"]["total_theses"] += ticker_result["theses_generated"]
+                    else:
+                        results["summary"]["failures"] += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to process {ticker}: {e}")
+                    results["thesis_generation"][ticker] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
                     results["summary"]["failures"] += 1
-                    
-            except Exception as e:
-                logger.error(f"Failed to process {ticker}: {e}")
-                results["thesis_generation"][ticker] = {
-                    "status": "error",
-                    "error": str(e)
-                }
-                results["summary"]["failures"] += 1
         
         logger.info(
             f"Pipeline completed: {results['summary']['tickers_processed']} tickers, "
@@ -361,8 +365,29 @@ class FireworksCharliePipeline:
                                     "support": thesis_result.get("support", "")
                                 }
 
+                            # Get ticker_id
+                            ticker_db_id = self.db_manager.get_ticker_id(session, ticker)
+
+                            # Check if thesis already exists for this ticker and date
+                            # This prevents duplicate key violations in parallel processing
+                            from sqlalchemy import select
+                            existing_thesis = session.execute(
+                                select(ThesisGeneration).where(
+                                    ThesisGeneration.ticker_id == ticker_db_id,
+                                    ThesisGeneration.as_of_date == trading_day
+                                )
+                            ).scalar_one_or_none()
+
+                            if existing_thesis:
+                                logger.info(
+                                    f"Thesis for {ticker} on {trading_day} already exists (ID: {existing_thesis.thesis_id}) - skipping"
+                                )
+                                # Skip to next iteration
+                                continue
+
+                            # Insert new thesis generation
                             thesis_gen = ThesisGeneration(
-                                ticker_id=self.db_manager.get_ticker_id(session, ticker),
+                                ticker_id=ticker_db_id,
                                 as_of_date=trading_day,
                                 system_prompt=system_prompt,
                                 user_prompt=user_prompt,
@@ -376,9 +401,10 @@ class FireworksCharliePipeline:
                             session.add(thesis_gen)
                             session.commit()
 
+                            # ✅ DATABASE COMMIT SUCCESSFUL - Now safe to update state
+
                             # Create position record for this thesis
                             thesis_id = thesis_gen.thesis_id
-                            ticker_db_id = self.db_manager.get_ticker_id(session, ticker)
 
                             position_id = create_position_after_thesis(
                                 db_session=session,
@@ -396,7 +422,27 @@ class FireworksCharliePipeline:
                                     f"(likely insufficient future data)"
                                 )
 
-                            # Add prompt to checkpoint (also convert dates)
+                            # ✅ Increment counter ONLY after successful database commit
+                            theses_generated += 1
+
+                            logger.info(
+                                f"✅ Successfully saved thesis for {ticker} on {trading_day}: "
+                                f"{thesis_result['action']} (thesis_id: {thesis_id})"
+                            )
+
+                            # ✅ Save checkpoint ONLY after successful database save
+                            # This ensures we never mark a date as processed if the save failed
+                            self.checkpoint_manager.save_rlvr_checkpoint(
+                                ticker=ticker,
+                                processed_date=trading_day,
+                                cumulative_data=cumulative_data,
+                                metadata={
+                                    "theses_generated": theses_generated,
+                                    "dedup_stats": deduplicator.get_deduplication_stats()
+                                }
+                            )
+
+                            # Add prompt to checkpoint history (also convert dates)
                             checkpoint_assistant_response = thesis_result.get("assistant_response")
                             if checkpoint_assistant_response:
                                 checkpoint_assistant_response = convert_dates(checkpoint_assistant_response)
@@ -409,28 +455,32 @@ class FireworksCharliePipeline:
                                 assistant_response=checkpoint_assistant_response
                             )
 
-                            theses_generated += 1
-                            logger.info(
-                                f"Generated thesis for {ticker} on {trading_day}: "
-                                f"{thesis_result['action']}"
-                            )
-
                         except Exception as e:
-                            logger.error(f"Failed to save thesis to database: {e}")
+                            # ❌ DATABASE SAVE FAILED - Do NOT update checkpoint or counter
+                            logger.error(f"❌ FAILED to save thesis for {ticker} on {trading_day}: {e}")
+                            logger.error(f"   Error type: {type(e).__name__}")
                             logger.debug(traceback.format_exc())
+
                             if session:
                                 session.rollback()
+                                logger.warning(f"   Rolled back database transaction for {ticker} on {trading_day}")
+
                             errors.append({
-                                "date": trading_day.isoformat(),  # Convert date to string!
+                                "date": trading_day.isoformat(),
                                 "error": f"Database save failed: {str(e)}"
                             })
+
+                            # ❌ DO NOT save checkpoint when database save fails
+                            # ❌ DO NOT increment theses_generated counter
+                            # This ensures the date will be retried on next run
+
                         finally:
                             if session:
                                 session.close()
                     else:
                         # LLM generation failed
                         error_msg = thesis_result.get("error", "Unknown LLM error")
-                        logger.error(f"LLM generation failed: {error_msg}")
+                        logger.error(f"❌ LLM generation failed for {ticker} on {trading_day}: {error_msg}")
                         errors.append({
                             "date": trading_day,
                             "error": error_msg
@@ -438,22 +488,11 @@ class FireworksCharliePipeline:
                 else:
                     # No LLM client available
                     error_msg = "No LLM client configured"
-                    logger.error(error_msg)
+                    logger.error(f"❌ {error_msg}")
                     errors.append({
                         "date": trading_day,
                         "error": error_msg
                     })
-                
-                # Save checkpoint after each successful day
-                self.checkpoint_manager.save_rlvr_checkpoint(
-                    ticker=ticker,
-                    processed_date=trading_day,
-                    cumulative_data=cumulative_data,
-                    metadata={
-                        "theses_generated": theses_generated,
-                        "dedup_stats": deduplicator.get_deduplication_stats()
-                    }
-                )
                 
             except Exception as e:
                 logger.error(f"Error processing {ticker} on {trading_day}: {e}")
@@ -503,6 +542,17 @@ class FireworksCharliePipeline:
             # Failed to generate any theses
             status = "error"
 
+        # Log comprehensive error summary if there were failures
+        if len(errors) > 0:
+            logger.error(f"⚠️  {ticker}: {len(errors)} failures during processing!")
+            logger.error(f"   Successfully saved: {theses_generated} theses")
+            logger.error(f"   Failed: {len(errors)} dates")
+            logger.error("   First 5 failures:")
+            for error in errors[:5]:
+                logger.error(f"      • {error['date']}: {error['error']}")
+            if len(errors) > 5:
+                logger.error(f"   ... and {len(errors) - 5} more failures")
+
         return {
             "status": status,
             "ticker": ticker,
@@ -517,7 +567,6 @@ class FireworksCharliePipeline:
     def cleanup(self):
         """Clean up resources"""
         logger.info("Shutting down pipeline")
-        self.executor.shutdown(wait=True)
 
         # Dispose database engine to release all connections
         if hasattr(self, 'db_manager') and self.db_manager:

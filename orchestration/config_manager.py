@@ -110,7 +110,6 @@ class Config:
         self.STRONG_SELL_THRESHOLD = float(os.environ.get("STRONG_SELL_THRESHOLD", "-3.0"))
 
         # ====== Processing Configuration ======
-        self.PARALLEL_WORKERS = int(os.environ.get("PARALLEL_WORKERS", "2"))
         self.CHECKPOINT_INTERVAL = int(os.environ.get("CHECKPOINT_INTERVAL", "1"))
 
         # Token Budget Management
@@ -130,6 +129,12 @@ class Config:
         self.MAX_DAYS_MEDIUM = int(os.environ.get("MAX_DAYS_MEDIUM", "30"))    # Summarized
         self.MAX_DAYS_HISTORICAL = int(os.environ.get("MAX_DAYS_HISTORICAL", "90"))  # Key insights only
         self.ENABLE_AGGRESSIVE_COMPRESSION = os.environ.get("ENABLE_AGGRESSIVE_COMPRESSION", "true").lower() == "true"
+
+        # News retrieval and prompt configuration
+        self.NEWS_LOOKBACK_DAYS = int(os.environ.get("NEWS_LOOKBACK_DAYS", "30"))
+        self.NEWS_MAX_ARTICLES = int(os.environ.get("NEWS_MAX_ARTICLES", "100"))
+        self.NEWS_DISPLAY_COUNT = int(os.environ.get("NEWS_DISPLAY_COUNT", "15"))
+        self.NEWS_MIN_CONFIDENCE = float(os.environ.get("NEWS_MIN_CONFIDENCE", "0.0"))
 
         # ====== Directory Configuration ======
         self.DATA_ROOT = os.environ.get("DATA_ROOT", "/opt/Fireworks-Charlie/data")

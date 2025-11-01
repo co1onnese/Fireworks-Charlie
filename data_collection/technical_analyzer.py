@@ -112,8 +112,10 @@ class TechnicalAnalyzer:
             close = latest['close']
             upper = latest['bollinger_upper']
             lower = latest['bollinger_lower']
-            
-            if not pd.isna(upper) and not pd.isna(lower):
+
+            # ✅ Check ALL values for None/NaN before comparison
+            if (close is not None and upper is not None and lower is not None and
+                not pd.isna(close) and not pd.isna(upper) and not pd.isna(lower)):
                 if close > upper:
                     insights.append("Price: Above Bollinger Upper Band (Overbought)")
                 elif close < lower:
@@ -126,13 +128,16 @@ class TechnicalAnalyzer:
             sma_20 = latest['sma_20']
             sma_50 = latest['sma_50']
             close = latest['close']
-            
-            if close > sma_20 > sma_50:
-                insights.append("Moving Averages: Bullish Alignment")
-            elif close < sma_20 < sma_50:
-                insights.append("Moving Averages: Bearish Alignment")
-            else:
-                insights.append("Moving Averages: Mixed Signals")
+
+            # ✅ Check ALL values for None/NaN before chained comparison
+            if (close is not None and sma_20 is not None and sma_50 is not None and
+                not pd.isna(close) and not pd.isna(sma_20) and not pd.isna(sma_50)):
+                if close > sma_20 > sma_50:
+                    insights.append("Moving Averages: Bullish Alignment")
+                elif close < sma_20 < sma_50:
+                    insights.append("Moving Averages: Bearish Alignment")
+                else:
+                    insights.append("Moving Averages: Mixed Signals")
         
         return " | ".join(insights)
     
