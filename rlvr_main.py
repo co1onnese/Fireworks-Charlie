@@ -22,7 +22,7 @@ sys.path.insert(0, '/opt/Fireworks-Charlie')
 from orchestration.config_manager import config
 from data_collection.database_manager import DatabaseManager
 from rlvr.dataset_generator import RLVRDatasetGenerator
-from rlvr.reward_function import stock_prediction_reward
+from rlvr.reward_function_advanced import stock_prediction_reward  # Using advanced version
 from rlvr.json_formatter import create_sample_training_examples, create_sample_dev_examples
 
 # Set up logging

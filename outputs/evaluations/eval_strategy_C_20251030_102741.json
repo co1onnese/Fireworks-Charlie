@@ -1,0 +1,261 @@
+{
+  "base_model": {
+    "model": "accounts/fireworks/models/deepseek-v3p1-terminus",
+    "dataset": "/opt/Fireworks-Charlie/storage/rlvr_datasets/dev.jsonl",
+    "strategy": "C",
+    "total_examples": 3,
+    "evaluated": 3,
+    "errors": 0,
+    "correct": 1,
+    "incorrect": 2,
+    "accuracy": 0.3333333333333333,
+    "action_statistics": {
+      "buy": {
+        "count": 3,
+        "correct": 1,
+        "accuracy": 0.3333333333333333,
+        "mean_portfolio_return": 1.1681666666666668,
+        "std_portfolio_return": 1.0892883104730968
+      }
+    },
+    "return_statistics": {
+      "portfolio": {
+        "mean": 1.1681666666666668,
+        "median": 1.2095,
+        "std": 1.0892883104730968,
+        "min": 0.0588,
+        "max": 2.2362,
+        "total_return": 3.5045,
+        "positive_count": 3,
+        "negative_count": 0,
+        "neutral_count": 0
+      },
+      "actual": {
+        "mean": 1.1681666666666668,
+        "median": 1.2095,
+        "std": 1.0892883104730968,
+        "min": 0.0588,
+        "max": 2.2362,
+        "positive_count": 3,
+        "negative_count": 0,
+        "neutral_count": 0
+      }
+    },
+    "sharpe_ratio": 1.072412744573851,
+    "buy_and_hold_benchmark": {
+      "mean_return": 1.1681666666666668,
+      "std_return": 1.0892883104730968,
+      "sharpe_ratio": 1.072412744573851
+    },
+    "results": [
+      {
+        "ticker": "HD",
+        "entry_date": "2025-08-29",
+        "predicted_action": "buy",
+        "actual_return": 1.2095,
+        "portfolio_return": 1.2095,
+        "correct": false,
+        "reasoning": "Based on technical analysis of HD stock from May to August 2025, the stock demonstrates a clear upward trend with strong momentum. The price has increased from approximately $350 in late May to over $400 by late August, representing a significant gain of over 14%. The stock consistently trades above both its 20-day SMA and EMA, indicating sustained bullish momentum. Recent RSI readings between 63-70 suggest the stock is approaching overbought territory but still has room for movement. Volume patterns show increased activity during upward moves, particularly in late August with volumes exceeding 24 million shares. The positive yield curve (+0.64%) indicates favorable economic conditions for growth stocks. However, the absence of fundamental data prevents a complete assessment of valuation metrics and financial health.",
+        "support": "Key supporting metrics: Price appreciation from $350 to $412.79 (17.9% gain), current price of $408.90 trading above 20-day SMA ($391.55) and EMA ($393.78), RSI at 65.2 indicating strong but not extreme momentum, consistent higher highs and higher lows pattern since May, positive yield curve environment supporting growth stocks, and elevated volume during recent upward moves confirming institutional interest.",
+        "usage": {
+          "prompt_tokens": 10220,
+          "completion_tokens": 262,
+          "total_tokens": 10482
+        },
+        "ground_truth": {
+          "actual_return_pct": 1.2095,
+          "exit_date": "2025-09-04",
+          "days_held": 3,
+          "early_exit": false,
+          "entry_price": 406.77,
+          "exit_price": 411.69
+        },
+        "days_held": 3
+      },
+      {
+        "ticker": "MA",
+        "entry_date": "2025-08-29",
+        "predicted_action": "buy",
+        "actual_return": 0.0588,
+        "portfolio_return": 0.0588,
+        "correct": false,
+        "reasoning": "Based on the comprehensive technical analysis of MA stock from April to August 2025, I observe a clear bullish trend development. The stock has demonstrated strong momentum recovery from the June lows around $527-532 to current levels near $598. The technical picture shows: 1) Price has consistently traded above both the 20-day SMA ($575.10) and EMA ($578.27), indicating sustained upward momentum. 2) RSI readings have improved dramatically from oversold conditions below 30 in June to current levels around 74.5, showing strong buying pressure while remaining below overbought territory (80+). 3) The stock has established higher lows since the June bottom, with recent consolidation around $580-600 suggesting a healthy base formation. 4) Volume patterns show increased activity during upward moves, supporting the bullish thesis. Despite the absence of fundamental data, the technical setup suggests continued upward potential toward resistance levels around $600-610.",
+        "support": "Key supporting metrics: 1) Current price $598.96 trading 4.1% above 20-day SMA ($575.10) and 3.6% above EMA ($578.27). 2) RSI at 74.5 indicates strong momentum without extreme overbought conditions. 3) Stock has gained approximately 12.4% from June lows of $532.97. 4) Positive yield curve (+0.64%) supports favorable economic conditions for financial stocks. 5) Recent weekly performance shows +1.38% gain with higher highs established at $601.77.",
+        "usage": {
+          "prompt_tokens": 10220,
+          "completion_tokens": 337,
+          "total_tokens": 10557
+        },
+        "ground_truth": {
+          "actual_return_pct": 0.0588,
+          "exit_date": "2025-09-04",
+          "days_held": 3,
+          "early_exit": false,
+          "entry_price": 595.29,
+          "exit_price": 595.64
+        },
+        "days_held": 3
+      },
+      {
+        "ticker": "SBUX",
+        "entry_date": "2025-08-08",
+        "predicted_action": "buy",
+        "actual_return": 2.2362,
+        "portfolio_return": 2.2362,
+        "correct": true,
+        "reasoning": "SBUX has shown significant volatility with a clear recovery pattern from April 2025 lows around $76-80 to recent trading in the $86-94 range. The stock experienced a major rally in early April (+24.93% week) but has since consolidated. Technical indicators show mixed signals: RSI has improved from oversold levels below 30 to neutral territory (42-45 currently), suggesting reduced selling pressure. The price is trading near key moving averages (SMA20 at $94.09, EMA20 at $93.69), indicating potential support. Volume patterns show increased activity during rallies (108M+ shares) compared to declines, suggesting underlying demand. However, the stock faces resistance near $98-99 levels and has failed to sustain breaks above $95 consistently. The absence of fundamental data limits full assessment, but technical recovery from extreme lows and improved RSI momentum support a cautious bullish view.",
+        "support": "Key technical evidence: 1) Strong recovery from April 2025 lows of $76.15 to current $89-94 range represents ~20% upside from bottom. 2) RSI improved from severely oversold 16.7 in April to neutral 45.6 currently, indicating momentum shift. 3) Price trading above key EMA20 ($93.69) and near SMA20 ($94.09) providing technical support. 4) Volume spikes during upward moves (108M+ shares) confirm buyer interest. 5) Consolidated trading pattern between $85-95 suggests base formation after April volatility.",
+        "usage": {
+          "prompt_tokens": 10200,
+          "completion_tokens": 329,
+          "total_tokens": 10529
+        },
+        "ground_truth": {
+          "actual_return_pct": 2.2362,
+          "exit_date": "2025-08-13",
+          "days_held": 3,
+          "early_exit": false,
+          "entry_price": 92.12,
+          "exit_price": 94.18
+        },
+        "days_held": 3
+      }
+    ]
+  },
+  "fine_tuned_model": {
+    "model": "accounts/fireworks/models/deepseek-v3p1-terminus",
+    "dataset": "/opt/Fireworks-Charlie/storage/rlvr_datasets/dev.jsonl",
+    "strategy": "C",
+    "total_examples": 3,
+    "evaluated": 3,
+    "errors": 0,
+    "correct": 1,
+    "incorrect": 2,
+    "accuracy": 0.3333333333333333,
+    "action_statistics": {
+      "buy": {
+        "count": 3,
+        "correct": 1,
+        "accuracy": 0.3333333333333333,
+        "mean_portfolio_return": 1.1681666666666668,
+        "std_portfolio_return": 1.0892883104730968
+      }
+    },
+    "return_statistics": {
+      "portfolio": {
+        "mean": 1.1681666666666668,
+        "median": 1.2095,
+        "std": 1.0892883104730968,
+        "min": 0.0588,
+        "max": 2.2362,
+        "total_return": 3.5045,
+        "positive_count": 3,
+        "negative_count": 0,
+        "neutral_count": 0
+      },
+      "actual": {
+        "mean": 1.1681666666666668,
+        "median": 1.2095,
+        "std": 1.0892883104730968,
+        "min": 0.0588,
+        "max": 2.2362,
+        "positive_count": 3,
+        "negative_count": 0,
+        "neutral_count": 0
+      }
+    },
+    "sharpe_ratio": 1.072412744573851,
+    "buy_and_hold_benchmark": {
+      "mean_return": 1.1681666666666668,
+      "std_return": 1.0892883104730968,
+      "sharpe_ratio": 1.072412744573851
+    },
+    "results": [
+      {
+        "ticker": "HD",
+        "entry_date": "2025-08-29",
+        "predicted_action": "buy",
+        "actual_return": 1.2095,
+        "portfolio_return": 1.2095,
+        "correct": false,
+        "reasoning": "Based on comprehensive technical analysis of HD stock over the past 5 months, the stock has demonstrated strong momentum with a clear upward trend. The current price of $408.90 is trading well above both the 20-day SMA ($391.55) and EMA ($393.78), indicating sustained bullish momentum. The RSI at 65.2 shows the stock is approaching overbought territory but still has room for upward movement before becoming excessively extended. Volume patterns show consistent activity with recent weeks seeing increased volume during upward moves. The stock has recovered strongly from its June lows around $350 and has established higher highs and higher lows throughout July and August. The positive yield curve (10Y-2Y spread of +0.64%) suggests favorable macroeconomic conditions for equity investments. While the stock has experienced some volatility with weekly declines of 3-4%, the overall trajectory remains positive with strong support levels established around $380-$390.",
+        "support": "Key technical metrics supporting the buy recommendation: 1) Current price ($408.90) is 4.4% above the 20-day SMA ($391.55) and 3.8% above the 20-day EMA ($393.78), confirming bullish momentum. 2) RSI at 65.2 indicates strength without being overbought (above 70). 3) Stock has gained approximately 17% from June lows of $350 to current levels. 4) Positive yield curve environment supports equity risk appetite. 5) Consistent volume patterns with recent weeks showing increased activity during advances. 6) Technical support levels are well-established in the $380-$390 range, providing downside protection.",
+        "usage": {
+          "prompt_tokens": 10220,
+          "completion_tokens": 352,
+          "total_tokens": 10572
+        },
+        "ground_truth": {
+          "actual_return_pct": 1.2095,
+          "exit_date": "2025-09-04",
+          "days_held": 3,
+          "early_exit": false,
+          "entry_price": 406.77,
+          "exit_price": 411.69
+        },
+        "days_held": 3
+      },
+      {
+        "ticker": "MA",
+        "entry_date": "2025-08-29",
+        "predicted_action": "buy",
+        "actual_return": 0.0588,
+        "portfolio_return": 0.0588,
+        "correct": false,
+        "reasoning": "Analyzing Mastercard's (MA) technical data from April to August 2025 reveals a strong bullish trend with consistent upward momentum. The stock has demonstrated significant recovery from lows around $500 in April to current levels near $600, representing approximately 20% appreciation. Key technical indicators show: 1) Price consistently trading above both 20-day SMA and EMA since late June, indicating sustained upward momentum (current price $584-$598 vs. SMA $569-$575 and EMA $571-$579); 2) RSI readings have moderated from overbought levels above 80 in May to healthier ranges between 60-75, suggesting consolidation of gains without excessive speculation; 3) Volume patterns show increased activity during breakout periods (15-25 million shares) compared to consolidation phases (8-12 million shares), confirming institutional participation. The yield curve remaining positive (+0.64%) supports continued economic expansion favorable for payment processors. While the stock has pulled back slightly from recent highs above $600, this represents healthy profit-taking within a clear uptrend.",
+        "support": "1) Strong technical uptrend with price advancing from $500-$530 range in April to $580-$600 range in August; 2) Price consistently above key moving averages (20-day SMA and EMA) since June, confirming bullish momentum; 3) RSI normalized from overbought conditions to sustainable levels (60-75); 4) Positive yield curve indicates supportive macroeconomic environment for financial services; 5) Volume confirmation during upward moves validates institutional buying interest.",
+        "usage": {
+          "prompt_tokens": 10220,
+          "completion_tokens": 327,
+          "total_tokens": 10547
+        },
+        "ground_truth": {
+          "actual_return_pct": 0.0588,
+          "exit_date": "2025-09-04",
+          "days_held": 3,
+          "early_exit": false,
+          "entry_price": 595.29,
+          "exit_price": 595.64
+        },
+        "days_held": 3
+      },
+      {
+        "ticker": "SBUX",
+        "entry_date": "2025-08-08",
+        "predicted_action": "buy",
+        "actual_return": 2.2362,
+        "portfolio_return": 2.2362,
+        "correct": true,
+        "reasoning": "Based on the technical data analysis, SBUX stock has shown significant volatility over the past several months, with a clear recovery trend emerging from April 2025 lows. The stock experienced a major decline in April 2025 (reaching lows around $76-80) followed by a strong rebound (+24.93% in early April). Currently trading around $89-93, the stock appears to be consolidating above its April lows. Key technical observations include: RSI readings currently in the 40-45 range (neutral territory, not overbought), price trading close to both 20-day SMA ($93-94) and EMA ($93), and recent volume spikes indicating renewed investor interest. The stock has demonstrated support around $85-86 levels with resistance near $98-99. The technical setup suggests a base formation with potential for upward movement given the recovery from oversold conditions earlier in the year.",
+        "support": "1) Strong recovery from April 2025 lows of $76-80 to current levels around $90-93 represents approximately 18-22% upside from bottom. 2) RSI at 45.6 indicates neutral momentum with room for upward movement before overbought conditions. 3) Price trading near moving averages suggests balanced technical positioning. 4) Volume spikes in recent weeks (108+ million shares) indicate renewed institutional interest. 5) Established support around $85-86 provides technical downside protection. 6) The stock has weathered significant volatility and appears to be stabilizing in a higher trading range compared to April-May lows.",
+        "usage": {
+          "prompt_tokens": 10200,
+          "completion_tokens": 332,
+          "total_tokens": 10532
+        },
+        "ground_truth": {
+          "actual_return_pct": 2.2362,
+          "exit_date": "2025-08-13",
+          "days_held": 3,
+          "early_exit": false,
+          "entry_price": 92.12,
+          "exit_price": 94.18
+        },
+        "days_held": 3
+      }
+    ]
+  },
+  "comparison": {
+    "accuracy_improvement": 0.0,
+    "return_improvement": 0.0,
+    "sharpe_improvement": 0.0,
+    "base_accuracy": 0.3333333333333333,
+    "finetuned_accuracy": 0.3333333333333333,
+    "base_sharpe": 1.072412744573851,
+    "finetuned_sharpe": 1.072412744573851,
+    "base_mean_return": 1.1681666666666668,
+    "finetuned_mean_return": 1.1681666666666668
+  },
+  "strategy": "C",
+  "evaluated_at": "2025-10-30T10:27:41.492644"
+}

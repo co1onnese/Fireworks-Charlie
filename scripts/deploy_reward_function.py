@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, '/opt/Fireworks-Charlie')
 
 from orchestration.config_manager import config
-from rlvr.reward_function import stock_prediction_reward
+from rlvr.reward_function_advanced import stock_prediction_reward  # Using advanced version
 
 # Set up logging
 logging.basicConfig(

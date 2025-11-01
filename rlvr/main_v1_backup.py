@@ -94,10 +94,7 @@ def evaluate(
             return _create_error_result(f"Invalid JSON: {str(e)}")
         
         if not _validate_response_data(response_data):
-            return _create_error_result(
-                "Missing required fields (action, reasoning, support)",
-                {"found_keys": list(response_data.keys())}
-            )
+            return _create_error_result("Missing required fields (action, reasoning, support)")
         
         # Extract data
         predicted_action = response_data.get("action", "").lower()
@@ -442,27 +439,11 @@ def _create_detailed_reason(
     )
 
 
-def _create_error_result(error_message: str, context: Dict[str, Any] = None) -> EvaluateResult:
-    """
-    Create error result with optional debugging context.
-    
-    Args:
-        error_message: Description of the error
-        context: Optional dict with debugging info (truncated to 150 chars)
-    """
-    full_reason = f"Error: {error_message}"
-    
-    # Add context for debugging (truncated to avoid huge messages)
-    if context:
-        try:
-            context_str = json.dumps(context, default=str)[:150]
-            full_reason += f" | {context_str}"
-        except Exception:
-            pass  # Ignore errors in error handling
-    
+def _create_error_result(error_message: str) -> EvaluateResult:
+    """Create error result."""
     return EvaluateResult(
         score=0.0,
-        reason=full_reason,
+        reason=f"Error: {error_message}",
         metrics={
             "error": MetricResult(
                 score=0.0,

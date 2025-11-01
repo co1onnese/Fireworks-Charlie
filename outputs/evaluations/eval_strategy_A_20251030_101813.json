@@ -1,0 +1,36 @@
+{
+  "base_model": {
+    "model": "accounts/fireworks/models/deepseek-v3p1-terminus",
+    "dataset": "/opt/Fireworks-Charlie/storage/rlvr_datasets/dev.jsonl",
+    "strategy": "A",
+    "total_examples": 3,
+    "evaluated": 3,
+    "errors": 0,
+    "correct": 0,
+    "incorrect": 3,
+    "accuracy": 0.0,
+    "action_statistics": {
+      "buy": {
+        "count": 2,
+        "correct": 0,
+        "accuracy": 0.0,
+        "mean_portfolio_return": 0.63415,
+        "std_portfolio_return": 0.8136677731113603
+      },
+      "hold": {
+        "count": 1,
+        "correct": 0,
+        "accuracy": 0.0,
+        "mean_portfolio_return": 0.0,
+        "std_portfolio_return": 0.0
+      }
+    },
+    "return_statistics": {
+      "portfolio": {
+        "mean": 0.4227666666666667,
+        "median": 0.0588,
+        "std": 0.6819650748633197,
+        "min": 0.0,
+        "max": 1.2095,
+        "total_return": 1.2683,
+        "positive_count": 

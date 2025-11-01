@@ -1,20 +1,18 @@
 """
-Self-Contained Stock Prediction Reward Function for Fireworks AI
+Advanced RLVR Reward Function - Sophisticated Multi-Metric Evaluation
 
-This file contains the complete reward function with all logic inlined.
-No external imports (except stdlib and reward_kit) to avoid sandbox issues.
+This reward function implements a hierarchical, multi-metric evaluation system
+that goes beyond simple directional accuracy to provide nuanced feedback.
 
-EVALUATION COMPONENTS (Multi-Metric Hierarchical System):
+Evaluation Components:
 1. Directional Accuracy (40%) - Is the direction correct?
 2. Magnitude Accuracy (25%) - How close is the prediction to actual return?
 3. Risk-Adjusted Performance (20%) - Sharpe ratio consideration
 4. Confidence Calibration (10%) - Are strong signals more accurate?
 5. Downside Protection (5%) - Extra penalty for large losses
-6. Reasoning Quality (Multiplier) - Quality of analysis affects final score
 
 Author: Fireworks-Charlie Team
-Date: 2025-10-31
-Version: 2.0 (Self-contained for Fireworks sandbox)
+Date: 2025-10-30
 """
 
 import json
@@ -24,10 +22,7 @@ from typing import Dict, List, Optional, Any
 from reward_kit import reward_function, EvaluateResult, MetricResult
 
 
-# ============================================================================
-# CONSTANTS
-# ============================================================================
-
+# Constants
 DIRECTIONAL_WEIGHT = 0.40
 MAGNITUDE_WEIGHT = 0.25
 SHARPE_WEIGHT = 0.20
@@ -52,20 +47,14 @@ ACTION_CONFIDENCE = {
 }
 
 
-# ============================================================================
-# MAIN REWARD FUNCTION (Required by reward-kit)
-# ============================================================================
-
 @reward_function
-def evaluate(
+def stock_prediction_reward(
     messages: List[Dict[str, str]],
     original_messages: Optional[List[Dict[str, str]]] = None,
     **kwargs
 ) -> EvaluateResult:
     """
     Advanced reward function with multi-metric hierarchical evaluation.
-    
-    This is the main entry point required by Fireworks AI.
     
     Evaluation Hierarchy:
     Level 1: Format validation (pass/fail)
@@ -94,10 +83,7 @@ def evaluate(
             return _create_error_result(f"Invalid JSON: {str(e)}")
         
         if not _validate_response_data(response_data):
-            return _create_error_result(
-                "Missing required fields (action, reasoning, support)",
-                {"found_keys": list(response_data.keys())}
-            )
+            return _create_error_result("Missing required fields (action, reasoning, support)")
         
         # Extract data
         predicted_action = response_data.get("action", "").lower()
@@ -183,8 +169,7 @@ def evaluate(
             ),
             "downside_protection": MetricResult(
                 score=1.0 - downside_penalty,
-                reason=f"Downside risk: {downside_penalty:.2%} penalty",
-                success=downside_penalty <= 0.3
+                reason=f"Downside risk: {downside_penalty:.2%} penalty"
             ),
             "reasoning_quality": MetricResult(
                 score=reasonableness_score,
@@ -208,10 +193,6 @@ def evaluate(
     except Exception as e:
         return _create_error_result(f"Internal error: {str(e)}")
 
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 
 def _extract_assistant_response(messages: List[Dict[str, str]]) -> Optional[str]:
     """Extract assistant response from messages."""
@@ -442,27 +423,11 @@ def _create_detailed_reason(
     )
 
 
-def _create_error_result(error_message: str, context: Dict[str, Any] = None) -> EvaluateResult:
-    """
-    Create error result with optional debugging context.
-    
-    Args:
-        error_message: Description of the error
-        context: Optional dict with debugging info (truncated to 150 chars)
-    """
-    full_reason = f"Error: {error_message}"
-    
-    # Add context for debugging (truncated to avoid huge messages)
-    if context:
-        try:
-            context_str = json.dumps(context, default=str)[:150]
-            full_reason += f" | {context_str}"
-        except Exception:
-            pass  # Ignore errors in error handling
-    
+def _create_error_result(error_message: str) -> EvaluateResult:
+    """Create error result."""
     return EvaluateResult(
         score=0.0,
-        reason=full_reason,
+        reason=f"Error: {error_message}",
         metrics={
             "error": MetricResult(
                 score=0.0,
@@ -473,10 +438,4 @@ def _create_error_result(error_message: str, context: Dict[str, Any] = None) -> 
     )
 
 
-# ============================================================================
-# EXPORTS
-# ============================================================================
-
-# Export both the decorated function and an alias
-stock_prediction_reward = evaluate
-__all__ = ["evaluate", "stock_prediction_reward"]
+__all__ = ["stock_prediction_reward"]
