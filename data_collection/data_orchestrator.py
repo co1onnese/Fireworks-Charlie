@@ -445,9 +445,11 @@ class DataOrchestrator:
             "published_at": news.published_at,
             "headline": news.headline,
             "summary": news.content,
-            "sentiment_score": float(news.sentiment_score) if news.sentiment_score else None,
+            # ✅ Fix: Check 'is not None' to preserve 0 as valid value
+            "sentiment_score": float(news.sentiment_score) if news.sentiment_score is not None else None,
             "sentiment_label": news.sentiment_label if hasattr(news, 'sentiment_label') else news.sentiment,
-            "sentiment_confidence": float(news.sentiment_confidence) if news.sentiment_confidence else 0.5,
+            # ✅ Fix: Check 'is not None' to preserve 0 as valid value
+            "sentiment_confidence": float(news.sentiment_confidence) if news.sentiment_confidence is not None else 0.5,
             "source": news.source,
             "url": news.url
         }

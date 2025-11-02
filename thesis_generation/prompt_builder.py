@@ -202,14 +202,19 @@ class CumulativePromptBuilder:
         latest_date = data[-1]["date"]
         
         for article in all_news:
-            pub_date = article["published_at"]
+            # ✅ Fix: Use .get() to avoid KeyError if published_at is missing
+            pub_date = article.get("published_at")
+            if not pub_date:
+                # Skip articles without publication date
+                continue
+
             if isinstance(pub_date, str):
                 pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00')).date()
             elif isinstance(pub_date, datetime):
                 pub_date = pub_date.date()
 
             days_ago = (latest_date - pub_date).days
-            
+
             if days_ago <= 3:
                 recent_news.append(article)
             elif days_ago <= 10:
@@ -243,13 +248,14 @@ class CumulativePromptBuilder:
     
     def _format_news_item(self, article: Dict[str, Any]) -> str:
         """Format a single news item"""
-        pub_date = article["published_at"]
+        # ✅ Fix: Use .get() to avoid KeyError if published_at is missing
+        pub_date = article.get("published_at", "Unknown Date")
         if isinstance(pub_date, datetime):
             pub_date = pub_date.strftime("%Y-%m-%d")
         elif isinstance(pub_date, date):
             pub_date = pub_date.strftime("%Y-%m-%d")
-        
-        formatted = f"  [{pub_date}] {article['headline']}"
+
+        formatted = f"  [{pub_date}] {article.get('headline', 'No headline')}"
         
         if article.get("sentiment_score") is not None:
             formatted += f" (Sentiment: {article['sentiment_score']:.2f})"
