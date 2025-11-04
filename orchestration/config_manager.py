@@ -136,6 +136,26 @@ class Config:
         self.NEWS_DISPLAY_COUNT = int(os.environ.get("NEWS_DISPLAY_COUNT", "15"))
         self.NEWS_MIN_CONFIDENCE = float(os.environ.get("NEWS_MIN_CONFIDENCE", "0.0"))
 
+        # ====== Data Collection Lookback Settings ======
+        # Technical data: Extend collection backward to ensure 30 trading days + indicator history
+        # 90 calendar days ≈ 60 trading days (enough for 30-day window + SMA-50 calculation)
+        self.TECHNICAL_LOOKBACK_DAYS = int(os.environ.get("TECHNICAL_LOOKBACK_DAYS", "90"))
+
+        # Fundamental data: Extend collection backward to ensure recent quarterly reports
+        # 12 months ensures we capture 4 quarters of data before training start
+        self.FUNDAMENTAL_LOOKBACK_MONTHS = int(os.environ.get("FUNDAMENTAL_LOOKBACK_MONTHS", "12"))
+
+        # Technical data window in prompts (number of trading days to include)
+        self.TECHNICAL_WINDOW_SIZE = int(os.environ.get("TECHNICAL_WINDOW_SIZE", "30"))
+
+        # Strict lookahead prevention (exclude prediction date from all data)
+        self.STRICT_LOOKAHEAD_PREVENTION = os.environ.get("STRICT_LOOKAHEAD_PREVENTION", "true").lower() == "true"
+
+        # Data quality thresholds
+        self.MAX_FUNDAMENTAL_AGE_DAYS = int(os.environ.get("MAX_FUNDAMENTAL_AGE_DAYS", "180"))
+        self.MAX_MACRO_AGE_DAYS = int(os.environ.get("MAX_MACRO_AGE_DAYS", "90"))
+        self.MIN_TECHNICAL_DAYS_REQUIRED = int(os.environ.get("MIN_TECHNICAL_DAYS_REQUIRED", "30"))
+
         # ====== Directory Configuration ======
         self.DATA_ROOT = os.environ.get("DATA_ROOT", "/opt/Fireworks-Charlie/data")
         self.CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", "/opt/Fireworks-Charlie/storage/checkpoints")

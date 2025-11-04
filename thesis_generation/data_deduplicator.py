@@ -59,16 +59,54 @@ class DataDeduplicator:
                     self.seen_fundamentals[ticker] = report_date
                     logger.debug(f"Including fundamentals for {ticker} from {report_date}")
             
-            # Deduplicate news - check content hash
+            # Deduplicate news - handle new structure with recent/older articles
             if day_data.get("news"):
-                for article in day_data["news"]:
-                    news_hash = self._compute_news_hash(article)
-                    if news_hash not in self.seen_news_hashes:
-                        deduped_day["news"].append(article)
-                        self.seen_news_hashes.add(news_hash)
-                
-                if deduped_day["news"]:
-                    logger.debug(f"Including {len(deduped_day['news'])} unique news items for {day_data['date']}")
+                news_data = day_data["news"]
+
+                # Handle new structured format (dict with recent_articles + older_articles)
+                if isinstance(news_data, dict):
+                    deduped_recent = []
+                    deduped_older = []
+
+                    # Deduplicate recent articles
+                    for article in news_data.get("recent_articles", []):
+                        news_hash = self._compute_news_hash(article)
+                        if news_hash not in self.seen_news_hashes:
+                            deduped_recent.append(article)
+                            self.seen_news_hashes.add(news_hash)
+
+                    # Deduplicate older articles
+                    for article in news_data.get("older_articles", []):
+                        news_hash = self._compute_news_hash(article)
+                        if news_hash not in self.seen_news_hashes:
+                            deduped_older.append(article)
+                            self.seen_news_hashes.add(news_hash)
+
+                    # Store in new format
+                    deduped_day["news"] = {
+                        "recent_articles": deduped_recent,
+                        "older_articles": deduped_older,
+                        "recent_dates": news_data.get("recent_dates", [])
+                    }
+
+                    total_deduped = len(deduped_recent) + len(deduped_older)
+                    if total_deduped > 0:
+                        logger.debug(
+                            f"Including {total_deduped} unique news items "
+                            f"({len(deduped_recent)} recent, {len(deduped_older)} older) "
+                            f"for {day_data['date']}"
+                        )
+                else:
+                    # Legacy format (list of articles) - keep for backward compatibility
+                    deduped_day["news"] = []
+                    for article in news_data:
+                        news_hash = self._compute_news_hash(article)
+                        if news_hash not in self.seen_news_hashes:
+                            deduped_day["news"].append(article)
+                            self.seen_news_hashes.add(news_hash)
+
+                    if deduped_day["news"]:
+                        logger.debug(f"Including {len(deduped_day['news'])} unique news items for {day_data['date']}")
             
             # Deduplicate macro features - only include if values changed
             if day_data.get("macro_features"):

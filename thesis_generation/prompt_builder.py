@@ -178,94 +178,191 @@ class CumulativePromptBuilder:
         return "\n".join(section_parts)
     
     def _build_news_section(self, ticker: str, data: List[Dict[str, Any]]) -> str:
-        """Build news and sentiment section"""
+        """
+        Build news and sentiment section with hybrid organization:
+        - Recent articles (3 most recent days): Full content, chronological
+        - Older articles (4-30 days): Headlines + summaries, sorted by confidence
+
+        Token budget tracking included for monitoring.
+        """
         section_parts = ["\n=== NEWS AND SENTIMENT ==="]
-        
-        # Collect all news articles
-        all_news = []
-        for day_data in data:
-            if day_data.get("news"):
-                for article in day_data["news"]:
-                    all_news.append(article)
-        
-        if not all_news:
+
+        # Extract news data from the most recent day's data (which has all 30 days of news)
+        news_data = None
+        for day_data in reversed(data):  # Start from most recent
+            if day_data.get("news") and isinstance(day_data["news"], dict):
+                news_data = day_data["news"]
+                break
+
+        if not news_data:
             section_parts.append("No news articles available in this period.")
             return "\n".join(section_parts)
-        
-        section_parts.append(f"News coverage for {ticker} ({len(all_news)} articles):\n")
-        
-        # Group news by recency buckets
-        recent_news = []  # Last 3 days
-        medium_news = []  # 4-10 days
-        older_news = []   # 11-30 days
-        
-        latest_date = data[-1]["date"]
-        
-        for article in all_news:
-            # ✅ Fix: Use .get() to avoid KeyError if published_at is missing
-            pub_date = article.get("published_at")
-            if not pub_date:
-                # Skip articles without publication date
-                continue
 
-            if isinstance(pub_date, str):
-                pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00')).date()
-            elif isinstance(pub_date, datetime):
-                pub_date = pub_date.date()
+        recent_articles = news_data.get("recent_articles", [])
+        older_articles = news_data.get("older_articles", [])
+        recent_dates = news_data.get("recent_dates", [])
 
-            days_ago = (latest_date - pub_date).days
+        total_articles = len(recent_articles) + len(older_articles)
 
-            if days_ago <= 3:
-                recent_news.append(article)
-            elif days_ago <= 10:
-                medium_news.append(article)
-            elif days_ago <= 30:
-                older_news.append(article)
-        
-        # Display news by bucket
-        if recent_news:
-            section_parts.append("Recent News (0-3 days):")
-            for article in recent_news[:10]:  # Limit to 10 most recent
-                section_parts.append(self._format_news_item(article))
-        
-        if medium_news:
-            section_parts.append("\nMedium-term News (4-10 days):")
-            for article in medium_news[:8]:  # Limit to 8
-                section_parts.append(self._format_news_item(article))
-        
-        if older_news:
-            section_parts.append("\nOlder News (11-30 days):")
-            for article in older_news[:5]:  # Limit to 5
-                section_parts.append(self._format_news_item(article))
-        
-        # Sentiment summary
-        sentiment_scores = [a.get("sentiment_score", 0) for a in all_news if a.get("sentiment_score") is not None]
+        if total_articles == 0:
+            section_parts.append("No news articles available in this period.")
+            return "\n".join(section_parts)
+
+        section_parts.append(
+            f"News coverage for {ticker}: {len(recent_articles)} recent articles "
+            f"(full content), {len(older_articles)} older articles (summaries)\n"
+        )
+
+        # Section 1: Recent Articles with FULL CONTENT (3 most recent days with articles)
+        if recent_articles:
+            recent_dates_str = ", ".join(recent_dates) if recent_dates else "recent"
+            section_parts.append(f"**Recent Articles ({recent_dates_str}) - Full Content:**\n")
+
+            # Group by date for better organization
+            from collections import defaultdict
+            articles_by_date = defaultdict(list)
+            for article in recent_articles:
+                pub_date = article.get("published_at")
+                if isinstance(pub_date, str):
+                    pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00')).date()
+                elif isinstance(pub_date, datetime):
+                    pub_date = pub_date.date()
+                articles_by_date[pub_date].append(article)
+
+            # Display chronologically by date (most recent first)
+            for pub_date in sorted(articles_by_date.keys(), reverse=True):
+                section_parts.append(f"\n--- {pub_date} ({len(articles_by_date[pub_date])} articles) ---")
+                for article in articles_by_date[pub_date]:
+                    section_parts.append(self._format_news_item_full(article))
+
+        # Section 2: Older Articles with HEADLINES + SUMMARIES (sorted by confidence)
+        if older_articles:
+            section_parts.append(f"\n**Older Articles (4-30 days) - Headlines & Summaries:**\n")
+            for article in older_articles:
+                section_parts.append(self._format_news_item_summary(article))
+
+        # Sentiment summary (if available)
+        all_articles = recent_articles + older_articles
+        sentiment_scores = [
+            a.get("sentiment_score")
+            for a in all_articles
+            if a.get("sentiment_score") is not None
+        ]
         if sentiment_scores:
             avg_sentiment = sum(sentiment_scores) / len(sentiment_scores)
-            section_parts.append(f"\nOverall Sentiment: {avg_sentiment:.3f} ({self._interpret_sentiment(avg_sentiment)})")
-        
-        return "\n".join(section_parts)
+            section_parts.append(
+                f"\n**Overall Sentiment:** {avg_sentiment:.3f} "
+                f"({self._interpret_sentiment(avg_sentiment)}) "
+                f"based on {len(sentiment_scores)} articles with sentiment scores"
+            )
+
+        # Token budget monitoring
+        news_section_text = "\n".join(section_parts)
+        estimated_tokens = len(news_section_text) // 4  # Rough estimate: 1 token ≈ 4 chars
+        if estimated_tokens > 50000:  # Warning threshold
+            logger = getattr(self, 'logger', None)
+            if logger:
+                logger.warning(
+                    f"News section for {ticker} is large: ~{estimated_tokens:,} tokens "
+                    f"({len(recent_articles)} recent + {len(older_articles)} older articles)"
+                )
+
+        return news_section_text
     
-    def _format_news_item(self, article: Dict[str, Any]) -> str:
-        """Format a single news item"""
-        # ✅ Fix: Use .get() to avoid KeyError if published_at is missing
+    def _format_news_item_full(self, article: Dict[str, Any]) -> str:
+        """
+        Format a recent news item with FULL CONTENT
+
+        Args:
+            article: Article dict with 'content' field (full text)
+
+        Returns:
+            Formatted string with headline, metadata, and full content
+        """
+        pub_date = article.get("published_at", "Unknown Date")
+        if isinstance(pub_date, datetime):
+            pub_date = pub_date.strftime("%Y-%m-%d %H:%M")
+        elif isinstance(pub_date, date):
+            pub_date = pub_date.strftime("%Y-%m-%d")
+        elif isinstance(pub_date, str):
+            try:
+                pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00')).strftime("%Y-%m-%d %H:%M")
+            except:
+                pass
+
+        parts = [
+            f"\n**[{pub_date}] {article.get('headline', 'No headline')}**",
+            f"Source: {article.get('source', 'Unknown')}"
+        ]
+
+        # Add sentiment if available
+        if article.get("sentiment_score") is not None:
+            sentiment = article["sentiment_score"]
+            parts.append(f"Sentiment: {sentiment:.3f} ({self._interpret_sentiment(sentiment)})")
+
+        # Add full content
+        content = article.get("content", "")
+        if content:
+            parts.append(f"\n{content}")
+        else:
+            parts.append("[No content available]")
+
+        parts.append("")  # Blank line after article
+
+        return "\n".join(parts)
+
+    def _format_news_item_summary(self, article: Dict[str, Any]) -> str:
+        """
+        Format an older news item with HEADLINE + SUMMARY only
+
+        Args:
+            article: Article dict with 'summary' field (or truncated content)
+
+        Returns:
+            Formatted string with headline and brief summary
+        """
         pub_date = article.get("published_at", "Unknown Date")
         if isinstance(pub_date, datetime):
             pub_date = pub_date.strftime("%Y-%m-%d")
         elif isinstance(pub_date, date):
             pub_date = pub_date.strftime("%Y-%m-%d")
+        elif isinstance(pub_date, str):
+            try:
+                pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00')).strftime("%Y-%m-%d")
+            except:
+                pass
 
-        formatted = f"  [{pub_date}] {article.get('headline', 'No headline')}"
-        
+        formatted = f"  • [{pub_date}] {article.get('headline', 'No headline')}"
+
+        # Add sentiment indicator if available
         if article.get("sentiment_score") is not None:
-            formatted += f" (Sentiment: {article['sentiment_score']:.2f})"
-        
-        if article.get("summary"):
-            # Truncate summary to 100 characters
-            summary = article["summary"][:100] + "..." if len(article["summary"]) > 100 else article["summary"]
+            sentiment = article["sentiment_score"]
+            indicator = ""
+            if sentiment > 0.3:
+                indicator = "📈"
+            elif sentiment < -0.3:
+                indicator = "📉"
+            else:
+                indicator = "➡️"
+            formatted += f" {indicator}"
+
+        # Add summary
+        summary = article.get("summary", "")
+        if summary:
+            # Limit summary to 150 characters for older articles
+            if len(summary) > 150:
+                summary = summary[:150] + "..."
             formatted += f"\n    {summary}"
-        
+
         return formatted
+
+    def _format_news_item(self, article: Dict[str, Any]) -> str:
+        """Legacy format method - kept for backward compatibility"""
+        # Detect if this is a recent article (has 'content') or older (has 'summary')
+        if article.get("content"):
+            return self._format_news_item_full(article)
+        else:
+            return self._format_news_item_summary(article)
     
     def _interpret_sentiment(self, score: float) -> str:
         """Interpret sentiment score"""
@@ -412,9 +509,27 @@ List 3-5 specific data points from the analysis that most strongly support your 
         # Build user prompt (data + analysis request)
         user_prompt_parts = []
         
-        # Header
+        # Header - clearly show prediction date vs data window
+        prompt_date = data_up_to_date[-1]['date']
+
+        # Calculate technical data window from the actual technical data
+        technical_dates = []
+        for day_data in data_up_to_date:
+            if day_data.get('technical'):
+                for tech_record in day_data['technical']:
+                    technical_dates.append(tech_record['date'])
+
         user_prompt_parts.append(f"=== COMPREHENSIVE INVESTMENT ANALYSIS FOR {ticker} ===")
-        user_prompt_parts.append(f"\\nDate: {data_up_to_date[-1]['date']}")
+        user_prompt_parts.append(f"\\n**Prediction Date:** {prompt_date}")
+
+        if technical_dates:
+            earliest_tech = min(technical_dates)
+            latest_tech = max(technical_dates)
+            user_prompt_parts.append(f"**Data Window:** {earliest_tech} to {latest_tech} ({len(set(technical_dates))} trading days)")
+            user_prompt_parts.append(f"**Important:** All data is from BEFORE the prediction date to prevent lookahead bias.")
+        else:
+            user_prompt_parts.append(f"**Data Window:** No technical data available")
+
         user_prompt_parts.append(f"\\nPlease analyze {ticker} stock and provide your investment recommendation with detailed reasoning.")
         
         # Data sections
@@ -437,7 +552,22 @@ List 3-5 specific data points from the analysis that most strongly support your 
         user_prompt_parts.append("\\nProvide your recommendation as JSON with reasoning, action, and supporting evidence.")
         
         user_prompt = "\\n".join(user_prompt_parts)
-        
+
+        # Token budget monitoring
+        total_chars = len(system_prompt) + len(user_prompt)
+        estimated_tokens = total_chars // 4  # Rough estimate: 1 token ≈ 4 chars
+
+        logger = getattr(self, 'logger', None)
+        if logger and estimated_tokens > 100000:
+            logger.warning(
+                f"Large prompt for {ticker} on {prompt_date}: ~{estimated_tokens:,} tokens "
+                f"({total_chars:,} chars). Context window: 131K tokens."
+            )
+        elif logger:
+            logger.info(
+                f"Prompt for {ticker} on {prompt_date}: ~{estimated_tokens:,} tokens"
+            )
+
         return system_prompt, user_prompt
     
     def _build_rlvr_system_prompt(self, response_format: str = "json") -> str:

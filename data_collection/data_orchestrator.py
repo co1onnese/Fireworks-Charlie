@@ -6,6 +6,7 @@ import os
 import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any
+from sqlalchemy import func
 
 from .database_manager import DatabaseManager
 from .data_processor import DataProcessor
@@ -45,20 +46,216 @@ class DataOrchestrator:
         ]
         
         logger.info("DataOrchestrator initialized")
-    
-    def collect_data_for_ticker(self, ticker: str, start_date: date, end_date: date) -> Dict[str, Any]:
+
+    def get_existing_data_range(self, ticker: str, data_type: str) -> tuple:
         """
-        Collect all data for a single ticker over a date range
-        
+        Get the date range of existing data for a ticker
+
         Args:
             ticker: Stock ticker symbol
-            start_date: Start date for data collection
+            data_type: 'technical', 'fundamental', 'news', or 'macro'
+
+        Returns:
+            tuple: (min_date, max_date, count) or (None, None, 0) if no data exists
+        """
+        from .database_manager import MarketData, Fundamentals, News, MacroFeature, Ticker
+
+        session = self.db_manager.get_session()
+        try:
+            # Get ticker object
+            ticker_obj = session.query(Ticker).filter(Ticker.symbol == ticker).first()
+            if not ticker_obj:
+                logger.warning(f"Ticker {ticker} not found in database")
+                return (None, None, 0)
+
+            # Query based on data type
+            if data_type == 'technical':
+                result = session.query(
+                    func.min(MarketData.date),
+                    func.max(MarketData.date),
+                    func.count(MarketData.market_data_id)
+                ).filter(MarketData.ticker_id == ticker_obj.ticker_id).first()
+
+            elif data_type == 'fundamental':
+                result = session.query(
+                    func.min(Fundamentals.report_date),
+                    func.max(Fundamentals.report_date),
+                    func.count(Fundamentals.fundamentals_id)
+                ).filter(Fundamentals.ticker_id == ticker_obj.ticker_id).first()
+
+            elif data_type == 'news':
+                result = session.query(
+                    func.min(func.date(News.published_at)),
+                    func.max(func.date(News.published_at)),
+                    func.count(News.news_id)
+                ).filter(News.ticker_id == ticker_obj.ticker_id).first()
+
+            elif data_type == 'macro':
+                result = session.query(
+                    func.min(MacroFeature.date),
+                    func.max(MacroFeature.date),
+                    func.count(MacroFeature.macro_id)
+                ).filter(MacroFeature.date.isnot(None)).first()
+
+            else:
+                raise ValueError(f"Unknown data_type: {data_type}")
+
+            min_date, max_date, count = result
+            return (min_date, max_date, count if count else 0)
+
+        finally:
+            session.close()
+
+    def identify_data_gaps(self, ticker: str, start_date: date, end_date: date) -> dict:
+        """
+        Identify gaps in data coverage for a ticker
+
+        Args:
+            ticker: Stock ticker symbol
+            start_date: Desired start date
+            end_date: Desired end date
+
+        Returns:
+            Dict with gaps per data type:
+            {
+                'technical': [(gap_start1, gap_end1), (gap_start2, gap_end2)],
+                'fundamental': [(gap_start, gap_end)],
+                'news': [(gap_start, gap_end)],
+                'macro': [(gap_start, gap_end)]
+            }
+        """
+        from .database_manager import MarketData, Fundamentals, News, MacroFeature, Ticker
+        from sqlalchemy import and_, or_, distinct
+
+        session = self.db_manager.get_session()
+        try:
+            ticker_obj = session.query(Ticker).filter(Ticker.symbol == ticker).first()
+            if not ticker_obj:
+                logger.warning(f"Ticker {ticker} not found in database")
+                return {'technical': [], 'fundamental': [], 'news': [], 'macro': []}
+
+            gaps = {
+                'technical': [],
+                'fundamental': [],
+                'news': [],
+                'macro': []
+            }
+
+            # Technical data gaps (daily data, check for missing dates)
+            tech_min, tech_max, tech_count = self.get_existing_data_range(ticker, 'technical')
+
+            if tech_min and tech_max:
+                # Get all existing dates
+                existing_dates = set()
+                for row in session.query(MarketData.date).filter(
+                    MarketData.ticker_id == ticker_obj.ticker_id,
+                    MarketData.date >= max(start_date, tech_min),
+                    MarketData.date <= min(end_date, tech_max)
+                ).all():
+                    existing_dates.add(row[0])
+
+                # Find gaps by checking each date in range
+                current_date = start_date
+                gap_start = None
+                while current_date <= end_date:
+                    # Check if date is a trading day (Monday-Friday)
+                    if current_date.weekday() < 5:  # 0=Monday, 6=Sunday
+                        if current_date not in existing_dates:
+                            # Found a gap
+                            if gap_start is None:
+                                gap_start = current_date
+                        else:
+                            # Gap ended
+                            if gap_start is not None:
+                                gaps['technical'].append((gap_start, current_date - timedelta(days=1)))
+                                gap_start = None
+                    current_date += timedelta(days=1)
+
+                # Close final gap if it exists
+                if gap_start is not None:
+                    gaps['technical'].append((gap_start, end_date))
+
+            # Fundamental data gaps (quarterly, simpler check)
+            fund_min, fund_max, fund_count = self.get_existing_data_range(ticker, 'fundamental')
+
+            if fund_count == 0:
+                # No fundamentals at all
+                gaps['fundamental'].append((start_date, end_date))
+            elif fund_max and fund_max < end_date:
+                # Gaps after last report
+                gaps['fundamental'].append((fund_max + timedelta(days=1), end_date))
+
+            # News data gaps (daily, check for missing dates)
+            news_min, news_max, news_count = self.get_existing_data_range(ticker, 'news')
+
+            if news_min and news_max:
+                # Get existing news dates
+                existing_news_dates = set()
+                for row in session.query(distinct(func.date(News.published_at))).filter(
+                    News.ticker_id == ticker_obj.ticker_id,
+                    func.date(News.published_at) >= start_date,
+                    func.date(News.published_at) <= end_date
+                ).all():
+                    existing_news_dates.add(row[0])
+
+                # Find gaps
+                current_date = start_date
+                gap_start = None
+                while current_date <= end_date:
+                    if current_date not in existing_news_dates:
+                        if gap_start is None:
+                            gap_start = current_date
+                    else:
+                        if gap_start is not None:
+                            gaps['news'].append((gap_start, current_date - timedelta(days=1)))
+                            gap_start = None
+                    current_date += timedelta(days=1)
+
+                if gap_start is not None:
+                    gaps['news'].append((gap_start, end_date))
+
+            # Macro data gaps (global, check once)
+            macro_min, macro_max, macro_count = self.get_existing_data_range(ticker, 'macro')
+
+            if macro_count == 0:
+                gaps['macro'].append((start_date, end_date))
+            elif macro_max and macro_max < end_date:
+                gaps['macro'].append((macro_max + timedelta(days=1), end_date))
+
+            return gaps
+
+        finally:
+            session.close()
+
+    def collect_data_for_ticker(self, ticker: str, start_date: date, end_date: date,
+                                technical_lookback_days: int = 90,
+                                fundamental_lookback_months: int = 12,
+                                skip_existing: bool = True) -> Dict[str, Any]:
+        """
+        Collect all data for a single ticker over a date range
+
+        Args:
+            ticker: Stock ticker symbol
+            start_date: Start date for training data collection
             end_date: End date for data collection
-            
+            technical_lookback_days: Days to look back before start_date for technical data
+                                    (default: 90 days to ensure 30 trading days + history for indicators)
+            fundamental_lookback_months: Months to look back before start_date for fundamentals
+                                        (default: 12 months to ensure recent quarterly reports)
+            skip_existing: If True, only fetch missing data (skip existing). Default: True
+
         Returns:
             Dictionary with collected data status
         """
-        logger.info(f"Collecting data for {ticker} from {start_date} to {end_date}")
+        # Calculate extended dates for different data types
+        technical_start = start_date - timedelta(days=technical_lookback_days)
+        fundamental_start = start_date - timedelta(days=fundamental_lookback_months * 30)
+
+        logger.info(f"Collecting data for {ticker}")
+        logger.info(f"  Training period: {start_date} to {end_date}")
+        logger.info(f"  Technical data: {technical_start} to {end_date} (extended {technical_lookback_days} days)")
+        logger.info(f"  Fundamental data: {fundamental_start} to {end_date} (extended {fundamental_lookback_months} months)")
+        logger.info(f"  News/insider data: {start_date} to {end_date} (no extension)")
         
         session = self.db_manager.get_session()
         processor = DataProcessor([ticker], start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
@@ -87,21 +284,24 @@ class DataOrchestrator:
             session.commit()
             logger.info(f"Ticker {ticker} metadata stored")
             
-            # 2. Fetch and process Technical Market Data
+            # 2. Fetch and process Technical Market Data (with extended lookback)
             if self.eodhd_client:
                 eod_raw = self.eodhd_client.get_eod_data(
-                    f"{ticker}.US", 
-                    start_date.strftime("%Y-%m-%d"), 
+                    f"{ticker}.US",
+                    technical_start.strftime("%Y-%m-%d"),  # Use extended start date
                     end_date.strftime("%Y-%m-%d")
                 )
                 eod_processed = processor.process_eod_data(eod_raw, f"{ticker}.US")
-                
+
                 # Add ticker_id to each record for the insert method
                 for record in eod_processed:
                     record["ticker_id"] = ticker_obj.ticker_id
                 self.db_manager.insert_technical_market_data(session, eod_processed)
                 session.commit()
-                logger.info(f"Stored {len(eod_processed)} technical market records")
+                logger.info(
+                    f"Stored {len(eod_processed)} technical market records "
+                    f"({technical_start} to {end_date}, includes {technical_lookback_days} day lookback)"
+                )
             
             # 3. Fetch and process Fundamentals
             if self.eodhd_client and fundamentals_raw:
@@ -322,73 +522,157 @@ class DataOrchestrator:
             if not ticker_obj:
                 return {"error": f"Ticker {ticker} not found"}
             
-            # Get technical data (expanded from 15 to 90 days)
+            # Get technical data - STRICT point-in-time to prevent lookahead bias
+            # We use date < as_of_date (not <=) to EXCLUDE the prediction date itself
+            # This ensures we only use data that would have been available BEFORE making the prediction
             from .database_manager import MarketData
             technical_data = session.query(MarketData).filter(
                 MarketData.ticker_id == ticker_obj.ticker_id,
-                MarketData.date <= as_of_date
+                MarketData.date < as_of_date  # CRITICAL: < not <= to prevent lookahead bias
             ).order_by(
                 MarketData.date.desc()
-            ).limit(90).all()  # Get last 90 days
+            ).limit(30).all()  # Get last 30 trading days (changed from 90 to match requirement)
+
+            # Validate no lookahead bias
+            if technical_data and len(technical_data) > 0:
+                latest_tech_date = max(t.date for t in technical_data)
+                if latest_tech_date >= as_of_date:
+                    logger.error(
+                        f"CRITICAL: Lookahead bias detected for {ticker} on {as_of_date}. "
+                        f"Technical data includes {latest_tech_date} which is >= prediction date."
+                    )
+                    # Don't return data with lookahead bias
+                    return {"error": f"Lookahead bias detected - data integrity compromised"}
+
+                # Log data window for transparency
+                earliest_tech_date = min(t.date for t in technical_data)
+                logger.debug(
+                    f"{ticker} on {as_of_date}: Technical data window is {earliest_tech_date} to {latest_tech_date} "
+                    f"({len(technical_data)} trading days, excludes prediction date)"
+                )
+
+            # Warn if we have fewer than expected trading days
+            if technical_data and len(technical_data) < 30:
+                logger.warning(
+                    f"{ticker} on {as_of_date}: Only {len(technical_data)} trading days available "
+                    f"(expected 30). This may occur near data collection start date."
+                )
             
-            # Get latest fundamentals
+            # Get latest fundamentals - use strict point-in-time (filing_date < as_of_date)
+            # Fundamentals are filed AFTER quarter end, so using < ensures we only use
+            # data that was publicly available BEFORE the prediction date
             from .database_manager import Fundamental, News, MacroFeature
             fundamentals = session.query(Fundamental).filter(
                 Fundamental.ticker_id == ticker_obj.ticker_id,
-                Fundamental.filing_date <= as_of_date
+                Fundamental.filing_date < as_of_date  # Strict < to prevent lookahead bias
             ).order_by(
                 Fundamental.filing_date.desc()
             ).first()
+
+            # Log fundamental data age for monitoring
+            if fundamentals:
+                data_age_days = (as_of_date - fundamentals.filing_date).days
+                if data_age_days > 180:
+                    logger.warning(
+                        f"{ticker} on {as_of_date}: Fundamental data is {data_age_days} days old "
+                        f"(filing_date: {fundamentals.filing_date}). Data may be stale."
+                    )
+                elif data_age_days > 120:
+                    logger.debug(
+                        f"{ticker} on {as_of_date}: Fundamental data is {data_age_days} days old "
+                        f"(filing_date: {fundamentals.filing_date})"
+                    )
+            else:
+                logger.warning(
+                    f"{ticker} on {as_of_date}: No fundamental data available before prediction date"
+                )
             
-            # Get news
+            # Get news - use strict point-in-time (published_at < as_of_date)
             # Convert as_of_date to datetime for comparison with published_date
             as_of_datetime = datetime.combine(as_of_date, datetime.min.time()) if isinstance(as_of_date, date) and not isinstance(as_of_date, datetime) else as_of_date
 
-            # Optimized: Get recent news articles (30 days, limited to 100, weighted by confidence)
-            # Only include articles with sentiment scores
-            news = session.query(News).filter(
-                News.ticker_id == ticker_obj.ticker_id,
-                News.published_at <= as_of_datetime,
-                News.published_at >= as_of_datetime - timedelta(days=30),
-                News.sentiment_score.isnot(None)  # Only articles with sentiment
-            ).order_by(
-                News.sentiment_confidence.desc(),  # High confidence first
-                News.published_at.desc()            # Then most recent
-            ).limit(100).all()  # Max 100 articles
+            # Two-phase news query strategy:
+            # Phase 1: Get ALL articles from most recent 3 days with articles (for full content)
+            # Phase 2: Get older articles (4-30 days) with limits (for headlines + summaries)
 
-            # Get 7-day sentiment aggregates for trend context
+            # Phase 1: Find most recent 3 days that have articles
+            recent_days_query = session.query(
+                func.date(News.published_at).label('article_date')
+            ).filter(
+                News.ticker_id == ticker_obj.ticker_id,
+                News.published_at < as_of_datetime  # Strict < to prevent lookahead bias
+            ).distinct().order_by(
+                func.date(News.published_at).desc()
+            ).limit(3)
+
+            recent_dates = [row.article_date for row in recent_days_query.all()]
+
+            # Get ALL articles from those 3 recent days (no limit for recent articles)
+            recent_news = []
+            if recent_dates:
+                recent_news = session.query(News).filter(
+                    News.ticker_id == ticker_obj.ticker_id,
+                    func.date(News.published_at).in_(recent_dates),
+                    News.published_at < as_of_datetime  # Strict < to prevent lookahead bias
+                ).order_by(
+                    News.published_at.desc()  # Most recent first within these days
+                ).all()
+
+            # Phase 2: Get older articles (4-30 days back), limit to 75, sorted by confidence if available
+            oldest_recent_date = min(recent_dates) if recent_dates else as_of_date
+            older_news = session.query(News).filter(
+                News.ticker_id == ticker_obj.ticker_id,
+                News.published_at < datetime.combine(oldest_recent_date, datetime.min.time()),  # Before recent period
+                News.published_at >= as_of_datetime - timedelta(days=30)  # Within 30 days
+            ).order_by(
+                # Sort by confidence if available (for better quality older articles), then by date
+                News.sentiment_confidence.desc().nullslast(),
+                News.published_at.desc()
+            ).limit(75).all()
+
+            # Combine recent (unlimited) + older (limited) news
+            news = recent_news + older_news
+
+            # Get 7-day sentiment aggregates for trend context - strict point-in-time
             from .database_manager import NewsSentimentFeature
             sentiment_features = session.query(NewsSentimentFeature).filter(
                 NewsSentimentFeature.ticker_id == ticker_obj.ticker_id,
-                NewsSentimentFeature.date <= as_of_date,
+                NewsSentimentFeature.date < as_of_date,  # Strict < to prevent lookahead bias
                 NewsSentimentFeature.date >= as_of_date - timedelta(days=7)
             ).order_by(
                 NewsSentimentFeature.date.desc()
             ).all()
-            
-            # Get macro features
+
+            # Get macro features - strict point-in-time
             from .database_manager import MacroFeature
             macro_features = session.query(MacroFeature).filter(
-                MacroFeature.date <= as_of_date
+                MacroFeature.date < as_of_date  # Strict < to prevent lookahead bias
             ).order_by(
                 MacroFeature.date.desc()
             ).first()
-            
-            # Get insider transactions (last 90 days)
+
+            # Get insider transactions (last 90 days) - strict point-in-time
             from .database_manager import InsiderTransaction
             insider_transactions = session.query(InsiderTransaction).filter(
                 InsiderTransaction.ticker_id == ticker_obj.ticker_id,
-                InsiderTransaction.transaction_date <= as_of_date
+                InsiderTransaction.transaction_date < as_of_date  # Strict < to prevent lookahead bias
             ).order_by(
                 InsiderTransaction.transaction_date.desc()
             ).limit(20).all()
             
+            # Serialize news with metadata about recent vs older
+            news_data = {
+                "recent_articles": [self._serialize_news(n, include_full_content=True) for n in recent_news],
+                "older_articles": [self._serialize_news(n, include_full_content=False) for n in older_news],
+                "recent_dates": [d.isoformat() for d in recent_dates] if recent_dates else []
+            }
+
             return {
                 "ticker": ticker,
                 "date": as_of_date,
                 "technical": [self._serialize_technical(t) for t in technical_data],
                 "fundamentals": self._serialize_fundamentals(fundamentals) if fundamentals else None,
-                "news": [self._serialize_news(n) for n in news],
+                "news": news_data,  # New structured format
                 "news_sentiment_features": self._serialize_sentiment_features(sentiment_features),
                 "news_summary": self._build_news_summary(news, sentiment_features),
                 "macro_features": self._serialize_macro_features(macro_features) if macro_features else None,
@@ -439,20 +723,43 @@ class DataOrchestrator:
             "revenue_yoy_change": float(fundamentals.revenue_yoy_pct) if fundamentals.revenue_yoy_pct else None,
         }
     
-    def _serialize_news(self, news) -> Dict[str, Any]:
-        """Serialize news record with full sentiment data"""
-        return {
+    def _serialize_news(self, news, include_full_content: bool = False) -> Dict[str, Any]:
+        """
+        Serialize news record with conditional content inclusion
+
+        Args:
+            news: News database record
+            include_full_content: If True, include full article content. If False, include only headline + summary
+
+        Returns:
+            Serialized news article with appropriate content level
+        """
+        article_data = {
             "published_at": news.published_at,
             "headline": news.headline,
-            "summary": news.content,
+            "source": news.source,
+            "url": news.url,
             # ✅ Fix: Check 'is not None' to preserve 0 as valid value
             "sentiment_score": float(news.sentiment_score) if news.sentiment_score is not None else None,
-            "sentiment_label": news.sentiment_label if hasattr(news, 'sentiment_label') else news.sentiment,
+            "sentiment_label": news.sentiment_label if hasattr(news, 'sentiment_label') else None,
             # ✅ Fix: Check 'is not None' to preserve 0 as valid value
-            "sentiment_confidence": float(news.sentiment_confidence) if news.sentiment_confidence is not None else 0.5,
-            "source": news.source,
-            "url": news.url
+            "sentiment_confidence": float(news.sentiment_confidence) if news.sentiment_confidence is not None else None,
         }
+
+        # Conditionally include full content or summary based on recency
+        if include_full_content:
+            # For recent articles (3 most recent days): include full content
+            article_data["content"] = news.content if news.content else news.summary
+        else:
+            # For older articles (4-30 days): include only summary (or first 200 chars of content)
+            if news.summary:
+                article_data["summary"] = news.summary
+            elif news.content:
+                article_data["summary"] = news.content[:200] + "..." if len(news.content) > 200 else news.content
+            else:
+                article_data["summary"] = None
+
+        return article_data
 
     def _serialize_sentiment_features(self, features) -> List[Dict[str, Any]]:
         """Serialize sentiment aggregates for trend analysis"""

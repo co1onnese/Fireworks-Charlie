@@ -85,12 +85,23 @@ class FireworksCharliePipeline:
 
         logger.info("FireworksCharliePipeline initialized successfully")
     
-    def run(self, 
+    def run(self,
             tickers: List[str] = None,
             start_date: str = None,
             end_date: str = None,
+            skip_existing: bool = True,
             resume: bool = True) -> Dict[str, Any]:
         """
+        Run the complete pipeline
+
+        Args:
+            tickers: List of ticker symbols (default: from config)
+            start_date: Start date as ISO string (YYYY-MM-DD)
+            end_date: End date as ISO string (YYYY-MM-DD)
+            skip_existing: If True, skip existing data and fill gaps only (default: True)
+            resume: Whether to resume from checkpoints
+
+        Returns:
         Run the full pipeline
         
         Args:
@@ -175,22 +186,72 @@ class FireworksCharliePipeline:
         
         return results
     
-    def _run_data_collection(self, 
-                           tickers: List[str], 
-                           start_date: date, 
-                           end_date: date) -> Dict[str, Any]:
-        """Run data collection phase"""
+    def _run_data_collection(self,
+                           tickers: List[str],
+                           start_date: date,
+                           end_date: date,
+                           skip_existing: bool = True) -> Dict[str, Any]:
+        """Run data collection phase
+
+        Args:
+            tickers: List of ticker symbols
+            start_date: Start date for data collection
+            end_date: End date for data collection
+            skip_existing: If True, skip existing data and fill gaps only (default: True)
+
+        Returns:
+            Dictionary with collection results
+        """
         results = {
             "tickers": {},
             "macro": {},
             "feature_engineering": {}
         }
-        
-        # Collect data for each ticker
+
+        if skip_existing:
+            logger.info("=" * 80)
+            logger.info("SMART DATA COLLECTION MODE: Skipping existing data, filling gaps only")
+            logger.info("=" * 80)
+        else:
+            logger.info("=" * 80)
+            logger.info("FORCE REFRESH MODE: Re-fetching all data")
+            logger.info("=" * 80)
+
+        # Collect data for each ticker (with extended lookback for better data coverage)
         for ticker in tickers:
-            logger.info(f"Collecting data for {ticker}")
+            logger.info(f"\nCollecting data for {ticker}")
+
+            if skip_existing:
+                # Smart collection: Check for gaps first
+                gaps = self.data_orchestrator.identify_data_gaps(ticker, start_date, end_date)
+
+                logger.info("  Identified gaps:")
+                if gaps['technical']:
+                    logger.info(f"    Technical: {len(gaps['technical'])} gap(s)")
+                if gaps['fundamental']:
+                    logger.info(f"    Fundamental: {len(gaps['fundamental'])} gap(s)")
+                if gaps['news']:
+                    logger.info(f"    News: {len(gaps['news'])} gap(s)")
+                if gaps['macro']:
+                    logger.info(f"    Macro: {len(gaps['macro'])} gap(s)")
+
+                # If no gaps found, skip collection entirely
+                if not any(gaps.values()):
+                    logger.info("  ✅ No gaps found - data already complete. Skipping collection.")
+                    results["tickers"][ticker] = {
+                        "status": "skipped",
+                        "reason": "no_gaps",
+                        "ticker": ticker
+                    }
+                    continue
+
+            # Collect data (with extended lookback for better data coverage)
             result = self.data_orchestrator.collect_data_for_ticker(
-                ticker, start_date, end_date
+                ticker,
+                start_date,
+                end_date,
+                technical_lookback_days=config.TECHNICAL_LOOKBACK_DAYS,
+                fundamental_lookback_months=config.FUNDAMENTAL_LOOKBACK_MONTHS
             )
             results["tickers"][ticker] = result
         
