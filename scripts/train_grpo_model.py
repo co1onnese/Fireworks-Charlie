@@ -93,6 +93,9 @@ def validate_training_files():
     return True
 
 
+SIGNED_URL_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50 MB - conservative threshold to avoid Cloudflare worker limits
+
+
 def upload_file_to_fireworks(file_path: str, purpose: str = "fine-tune") -> str:
     """
     Upload a file to Fireworks AI using the documented two-step API.
@@ -153,58 +156,64 @@ def upload_file_to_fireworks(file_path: str, purpose: str = "fine-tune") -> str:
         # Step 2: Get upload endpoint (for files, especially >150MB)
         file_size = os.path.getsize(file_path)
         filename = os.path.basename(file_path)
-        
-        # Check if we should use direct upload (<150MB) or signed URL (>150MB)
-        if file_size < 150 * 1024 * 1024:  # Less than 150MB
-            # Use direct :upload endpoint
+
+        use_signed_url = file_size >= SIGNED_URL_THRESHOLD_BYTES
+
+        if not use_signed_url:
+            # Attempt direct :upload endpoint first
             upload_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{dataset_id}:upload"
-            
+
             logger.debug(f"Using direct upload to: {upload_url}")
-            logger.debug(f"File size: {file_size:,} bytes (<150MB)")
-            
-            # Don't set Content-Type header for multipart upload
+            logger.debug(f"File size: {file_size:,} bytes (<{SIGNED_URL_THRESHOLD_BYTES} bytes threshold)")
+
             upload_headers = {
                 "Authorization": f"Bearer {config.FIREWORKS_API_KEY}"
             }
-            
+
             with open(file_path, 'rb') as f:
                 files = {
                     'file': (filename, f, 'application/jsonl')
                 }
-                
+
                 upload_response = requests.post(
                     upload_url,
                     headers=upload_headers,
                     files=files,
                     timeout=600
                 )
-            
+
             logger.debug(f"Upload response status: {upload_response.status_code}")
             logger.debug(f"Upload response: {upload_response.text[:500]}")
-            
-            if upload_response.status_code not in [200, 201]:
-                logger.error(f"Failed to upload file: {upload_response.status_code}")
-                logger.error(f"Response: {upload_response.text}")
-                raise Exception(f"File upload failed: {upload_response.text}")
-            
-            upload_data = upload_response.json()
-            logger.info(f"✓ File uploaded successfully!")
-            logger.info(f"✓ Dataset ID: {dataset_id}")
-            logger.info(f"✓ Filename: {upload_data.get('filename', filename)}")
-            logger.info(f"✓ Size: {upload_data.get('bytes', file_size):,} bytes")
-            
-        else:
-            # Use signed URL flow for large files
-            logger.debug(f"File size: {file_size:,} bytes (>150MB), using signed URL")
-            
+
+            if upload_response.status_code in [200, 201]:
+                upload_data = upload_response.json()
+                logger.info(f"✓ File uploaded successfully!")
+                logger.info(f"✓ Dataset ID: {dataset_id}")
+                logger.info(f"✓ Filename: {upload_data.get('filename', filename)}")
+                logger.info(f"✓ Size: {upload_data.get('bytes', file_size):,} bytes")
+            else:
+                logger.warning(
+                    "Direct upload failed with status %s. Falling back to signed URL.",
+                    upload_response.status_code,
+                )
+                logger.debug(f"Direct upload response body: {upload_response.text[:500]}")
+                use_signed_url = True
+
+        if use_signed_url:
+            logger.debug(
+                "File size: %s bytes, using signed URL flow (threshold: %s)",
+                f"{file_size:,}",
+                f"{SIGNED_URL_THRESHOLD_BYTES:,}",
+            )
+
             get_endpoint_url = f"https://api.fireworks.ai/v1/accounts/{config.FIREWORKS_ACCOUNT_ID}/datasets/{dataset_id}:getUploadEndpoint"
-            
+
             get_endpoint_payload = {
                 "filenameToSize": {
                     filename: file_size
                 }
             }
-            
+
             logger.debug(f"Getting upload endpoint: {get_endpoint_url}")
             endpoint_response = requests.post(
                 get_endpoint_url,
@@ -212,21 +221,20 @@ def upload_file_to_fireworks(file_path: str, purpose: str = "fine-tune") -> str:
                 json=get_endpoint_payload,
                 timeout=30
             )
-            
+
             if endpoint_response.status_code not in [200, 201]:
                 logger.error(f"Failed to get upload endpoint: {endpoint_response.status_code}")
                 logger.error(f"Response: {endpoint_response.text}")
                 raise Exception(f"Get upload endpoint failed: {endpoint_response.text}")
-            
+
             endpoint_data = endpoint_response.json()
             signed_url = endpoint_data.get('filenameToSignedUrls', {}).get(filename)
-            
+
             if not signed_url:
                 raise Exception(f"No signed URL returned for {filename}")
-            
+
             logger.info(f"✓ Got signed URL for upload")
-            
-            # Upload to signed URL
+
             with open(file_path, 'rb') as f:
                 signed_response = requests.put(
                     signed_url,
@@ -234,11 +242,11 @@ def upload_file_to_fireworks(file_path: str, purpose: str = "fine-tune") -> str:
                     headers={'Content-Type': 'application/jsonl'},
                     timeout=600
                 )
-            
+
             if signed_response.status_code not in [200, 201]:
                 logger.error(f"Failed to upload to signed URL: {signed_response.status_code}")
                 raise Exception(f"Signed URL upload failed")
-            
+
             logger.info(f"✓ File uploaded to signed URL!")
             logger.info(f"✓ Dataset ID: {dataset_id}")
         

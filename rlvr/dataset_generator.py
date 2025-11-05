@@ -21,7 +21,8 @@ from .json_formatter import (
     create_dev_example,
     write_jsonl_file,
     validate_training_example,
-    validate_dev_example
+    validate_dev_example,
+    validate_fireworks_format
 )
 from data_collection.database_manager import DatabaseManager
 from orchestration.config_manager import config
@@ -54,9 +55,11 @@ class RLVRDatasetGenerator:
             "valid_examples": 0,
             "skipped_insufficient_data": 0,
             "skipped_errors": 0,
+            "skipped_validation_errors": 0,
             "training_examples": 0,
             "dev_examples": 0
         }
+        self.validation_failures: List[Dict[str, Any]] = []
     
     def generate_rlvr_datasets(
         self,
@@ -81,12 +84,25 @@ class RLVRDatasetGenerator:
         """
         logger.info("Starting RLVR dataset generation")
         
+        # Reset stats and validation tracking per run
+        self.stats.update({
+            "total_theses": 0,
+            "valid_examples": 0,
+            "skipped_insufficient_data": 0,
+            "skipped_errors": 0,
+            "skipped_validation_errors": 0,
+            "training_examples": 0,
+            "dev_examples": 0
+        })
+        self.validation_failures = []
+
         # Ensure output directory exists
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
         # Query thesis generations
         theses = self._query_thesis_generations(tickers, start_date, end_date)
         logger.info(f"Found {len(theses)} thesis generations")
+        self.stats["total_theses"] = len(theses)
         
         if not theses:
             logger.warning("No thesis generations found")
@@ -142,12 +158,29 @@ class RLVRDatasetGenerator:
         self.stats["valid_examples"] = len(training_examples) + len(dev_examples)
         
         logger.info(f"Dataset generation completed: {self.stats}")
+
+        if self.validation_failures:
+            preview_count = min(5, len(self.validation_failures))
+            logger.warning(
+                "Validation failures encountered for %d examples (showing first %d)",
+                len(self.validation_failures),
+                preview_count,
+            )
+            for failure in self.validation_failures[:preview_count]:
+                logger.warning(
+                    "Validation failure | split=%s | thesis_id=%s | ticker=%s | errors=%s",
+                    failure.get("split"),
+                    failure.get("thesis_id"),
+                    failure.get("ticker"),
+                    failure.get("errors"),
+                )
         
         return {
             "train_file": str(train_file),
             "dev_file": str(dev_file),
             "stats": self.stats,
-            "train_split_date": train_split_date
+            "train_split_date": train_split_date,
+            "validation_failures": self.validation_failures,
         }
     
     def _query_thesis_generations(
@@ -315,6 +348,9 @@ class RLVRDatasetGenerator:
                     ground_truth=ground_truth,
                     metadata=metadata
                 )
+
+            if not self._validate_example(example, is_training, thesis):
+                return None
             
             return example
             
@@ -323,6 +359,49 @@ class RLVRDatasetGenerator:
             self.stats["skipped_errors"] += 1
             return None
     
+    def _validate_example(self, example: Dict[str, Any], is_training: bool, thesis: Dict[str, Any]) -> bool:
+        """Run structural validation for a generated example."""
+
+        errors: List[str] = []
+        split = "train" if is_training else "dev"
+
+        fireworks_ok, fireworks_errors = validate_fireworks_format(example)
+        if not fireworks_ok:
+            errors.extend(fireworks_errors)
+
+        if is_training:
+            specific_ok, specific_errors = validate_training_example(example)
+        else:
+            specific_ok, specific_errors = validate_dev_example(example)
+
+        if not specific_ok:
+            errors.extend(specific_errors)
+
+        if errors:
+            self.stats["skipped_validation_errors"] += 1
+
+            failure_summary = {
+                "thesis_id": thesis.get("thesis_id"),
+                "ticker": thesis.get("symbol"),
+                "split": split,
+                "errors": errors[:5],
+            }
+
+            if len(self.validation_failures) < 50:
+                self.validation_failures.append(failure_summary)
+
+            logger.warning(
+                "Example validation failed for thesis_id=%s (split=%s, ticker=%s): %s",
+                failure_summary["thesis_id"],
+                split,
+                failure_summary["ticker"],
+                errors,
+            )
+
+            return False
+
+        return True
+
     def _validate_assistant_response(self, response: Dict[str, Any]) -> bool:
         """
         Validate that assistant response has required fields.
@@ -371,7 +450,7 @@ class RLVRDatasetGenerator:
                 {"ticker_id": ticker_id, "entry_date": entry_date_obj}
             ).fetchone()
 
-            if not entry_price_query or not entry_price_query.close:
+            if not entry_price_query or entry_price_query.close is None:
                 logger.warning(
                     f"No entry price found for ticker_id={ticker_id}, "
                     f"entry_date={entry_date_obj}"
@@ -408,12 +487,12 @@ class RLVRDatasetGenerator:
 
             # Convert database result to dictionary with proper formatting
             return {
-                "return_pct": float(result.return_pct) if result.return_pct else None,
+                "return_pct": float(result.return_pct) if result.return_pct is not None else None,
                 "exit_date": result.exit_date.isoformat() if result.exit_date else None,
                 "days_held": result.days_held,
                 "early_exit": result.early_exit,
                 "entry_price": entry_price,
-                "exit_price": float(result.exit_price) if result.exit_price else None,
+                "exit_price": float(result.exit_price) if result.exit_price is not None else None,
                 "position_id": f"pos_{ticker_id}_{entry_date}"
             }
 
@@ -492,7 +571,8 @@ class RLVRDatasetGenerator:
             "train_file": None,
             "dev_file": None,
             "stats": self.stats,
-            "train_split_date": None
+            "train_split_date": None,
+            "validation_failures": []
         }
     
     def generate_sample_datasets(

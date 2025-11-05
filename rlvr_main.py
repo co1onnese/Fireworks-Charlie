@@ -22,6 +22,7 @@ sys.path.insert(0, '/opt/Fireworks-Charlie')
 from orchestration.config_manager import config
 from data_collection.database_manager import DatabaseManager
 from rlvr.dataset_generator import RLVRDatasetGenerator
+from rlvr.dataset_validator import validate_datasets
 from rlvr.reward_function_advanced import stock_prediction_reward  # Using advanced version
 from rlvr.json_formatter import create_sample_training_examples, create_sample_dev_examples
 
@@ -188,6 +189,73 @@ def train_model(args):
         return False
     
     return True
+
+
+def qa_datasets(args):
+    """Run QA validation on existing dataset files."""
+    print("🔍 Validating RLVR Datasets")
+    print("-" * 40)
+
+    train_file = args.train_file or config.RLVR_TRAIN_FILE
+    dev_file = args.dev_file or config.RLVR_DEV_FILE
+
+    result = validate_datasets(
+        train_file,
+        dev_file,
+        min_train_examples=args.min_train_examples,
+        min_dev_examples=args.min_dev_examples,
+        recommended_train_examples=args.recommended_train_examples,
+        recommended_dev_examples=args.recommended_dev_examples,
+        max_train_examples=args.max_train_examples,
+        max_dev_examples=args.max_dev_examples,
+        max_errors=args.max_errors,
+    )
+
+    def _print_split(split_result, label):
+        status = "✓" if split_result["success"] else "✗"
+        print(f"{status} {label} dataset: {split_result['parsed_examples']} examples")
+        print(
+            f"    File: {split_result['path']}\n"
+            f"    Min required: {split_result['min_examples_required']} | Met: {split_result['min_examples_met']}"
+        )
+
+        recommended = split_result.get("recommended_examples")
+        if recommended is not None:
+            print(
+                f"    Recommended: {recommended} | Met: {split_result['recommended_examples_met']}"
+            )
+
+        if split_result.get("max_examples") is not None:
+            print(
+                f"    Max allowed: {split_result['max_examples']} | Exceeded: {split_result['max_examples_exceeded']}"
+            )
+
+        error_counts = split_result["error_counts"]
+        if any(count > 0 for count in error_counts.values()):
+            print("    Errors:")
+            for error_type, count in error_counts.items():
+                if count > 0:
+                    print(f"      - {error_type.replace('_', ' ')}: {count}")
+
+        for err in split_result["validation_errors"]:
+            line_info = f"line {err['line']}" if err.get("line") else ""
+            print(f"      • {err['type']} {line_info} -> {err['error']}")
+
+    _print_split(result["train"], "Train")
+    _print_split(result["dev"], "Dev")
+
+    print("-" * 40)
+    print(
+        f"Total examples: {result['summary']['total_examples']} "
+        f"(Train {result['summary']['train_examples']} | Dev {result['summary']['dev_examples']})"
+    )
+
+    if result["success"]:
+        print("✅ Dataset QA passed")
+    else:
+        print("✗ Dataset QA failed. See errors above.")
+
+    return result["success"]
 
 
 def validate_setup(args):
@@ -415,6 +483,18 @@ Examples:
     status_parser = subparsers.add_parser('status', help='Check GRPO training job status')
     status_parser.add_argument('--job-id', help='Specific job ID to check')
 
+    # QA command
+    qa_parser = subparsers.add_parser('qa', help='Validate RLVR dataset files before upload')
+    qa_parser.add_argument('--train-file', default=config.RLVR_TRAIN_FILE, help='Path to training JSONL file')
+    qa_parser.add_argument('--dev-file', default=config.RLVR_DEV_FILE, help='Path to dev JSONL file')
+    qa_parser.add_argument('--min-train-examples', type=int, default=3, help='Minimum required training examples')
+    qa_parser.add_argument('--min-dev-examples', type=int, default=3, help='Minimum required dev examples')
+    qa_parser.add_argument('--recommended-train-examples', type=int, default=1000, help='Recommended training example count (informational)')
+    qa_parser.add_argument('--recommended-dev-examples', type=int, default=100, help='Recommended dev example count (informational)')
+    qa_parser.add_argument('--max-train-examples', type=int, default=3_000_000, help='Maximum allowed training examples')
+    qa_parser.add_argument('--max-dev-examples', type=int, default=3_000_000, help='Maximum allowed dev examples')
+    qa_parser.add_argument('--max-errors', type=int, default=25, help='Maximum number of detailed errors to display')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -429,7 +509,8 @@ Examples:
         'train': train_model,
         'validate': validate_setup,
         'stats': show_stats,
-        'status': check_training_status
+        'status': check_training_status,
+        'qa': qa_datasets,
     }
     
     if args.command in command_functions:

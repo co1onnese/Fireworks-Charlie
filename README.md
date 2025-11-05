@@ -55,7 +55,7 @@ python rlvr_main.py deploy
 python rlvr_main.py status --job-id YOUR_JOB_ID
 
 # Phase 6: Evaluate Model (when deployment complete)
-./scripts/compare_all_strategies.sh accounts/lstn/models/YOUR_MODEL_ID 5
+python scripts/evaluate_model.py --fine-tuned-model accounts/lstn/models/YOUR_MODEL_ID --strategy A
 ```
 
 ---
@@ -286,14 +286,7 @@ python scripts/check_model_status.py \
   --model-name accounts/lstn/models/YOUR_MODEL_ID
 ```
 
-**Quick Test (5 examples)**:
-```bash
-./scripts/compare_all_strategies.sh \
-  accounts/lstn/models/YOUR_MODEL_ID \
-  5
-```
-
-**Full Evaluation (402 examples per strategy)**:
+**Evaluate Strategies A, B, C**:
 ```bash
 for strategy in A B C; do
   python scripts/evaluate_model.py \
@@ -509,7 +502,7 @@ python scripts/check_model_status.py \
 **Solution**:
 1. Check dataset has `ground_truth` field
 2. Verify evaluator deployed correctly
-3. Test locally: `./scripts/test_reward_with_preview.sh`
+3. Test locally: `python rlvr_main.py test-local --sample`
 
 ### Training job fails immediately
 **Error**: "ExecutionError: [Sandbox] No module named 'rlvr'"
