@@ -1,0 +1,231 @@
+{
+  "model": "accounts/fireworks/models/deepseek-v3p1-terminus",
+  "dataset": "storage/rlvr_datasets/dev.jsonl",
+  "strategy": "A",
+  "total_examples": 10,
+  "evaluated": 6,
+  "errors": 4,
+  "correct": 1,
+  "incorrect": 5,
+  "accuracy": 0.16666666666666666,
+  "action_statistics": {
+    "buy": {
+      "count": 6,
+      "correct": 1,
+      "accuracy": 0.16666666666666666,
+      "mean_portfolio_return": -0.40376666666666666,
+      "std_portfolio_return": 1.9202227367330766
+    }
+  },
+  "return_statistics": {
+    "portfolio": {
+      "mean": -0.40376666666666666,
+      "median": -0.78245,
+      "std": 1.9202227367330766,
+      "min": -2.9898,
+      "max": 2.2893,
+      "total_return": -2.4226,
+      "positive_count": 2,
+      "negative_count": 4,
+      "neutral_count": 0
+    },
+    "actual": {
+      "mean": -0.40376666666666666,
+      "median": -0.78245,
+      "std": 1.9202227367330766,
+      "min": -2.9898,
+      "max": 2.2893,
+      "positive_count": 2,
+      "negative_count": 4,
+      "neutral_count": 0
+    }
+  },
+  "sharpe_ratio": -0.21027074564985365,
+  "buy_and_hold_benchmark": {
+    "mean_return": -0.40376666666666666,
+    "std_return": 1.9202227367330766,
+    "sharpe_ratio": -0.21027074564985365
+  },
+  "results": [
+    {
+      "ticker": "HD",
+      "entry_date": "2025-08-29",
+      "predicted_action": "buy",
+      "actual_return": 1.2095,
+      "portfolio_return": 1.2095,
+      "correct": false,
+      "reasoning": "Analyzing HD's technical data from April to August 2025 reveals a strong upward trend with significant price appreciation from the $350s to current levels around $408. The stock has demonstrated consistent support above key moving averages (SMA(20) at $383.79 and EMA(20) at $385.86), indicating sustained bullish momentum. Recent RSI readings between 63-65 suggest the stock is approaching overbought territory but still has room for upward movement before becoming excessively extended. Volume patterns show increased activity during breakout weeks, confirming institutional interest. The yield curve remains positively sloped (+0.64%), supporting favorable economic conditions for home improvement retailers. While the stock has gained approximately 15% from June lows, the technical structure remains intact with higher highs and higher lows.",
+      "support": "Key supporting metrics: 1) Price has broken above resistance levels with current close at $408.90 representing a 15% gain from June lows of $349.62. 2) Moving averages show bullish alignment with price trading well above both SMA(20) ($391.55) and EMA(20) ($393.78). 3) RSI at 65.2 indicates momentum remains positive without extreme overbought conditions. 4) Volume spikes to 24M+ shares during breakout weeks confirm institutional participation. 5) Positive yield curve slope suggests supportive macroeconomic environment for housing-related stocks.",
+      "usage": {
+        "prompt_tokens": 10220,
+        "completion_tokens": 302,
+        "total_tokens": 10522
+      },
+      "ground_truth": {
+        "actual_return_pct": 1.2095,
+        "exit_date": "2025-09-04",
+        "days_held": 3,
+        "early_exit": false,
+        "entry_price": 406.77,
+        "exit_price": 411.69
+      },
+      "days_held": 3
+    },
+    {
+      "ticker": "MA",
+      "entry_date": "2025-08-29",
+      "error": "Failed to parse prediction",
+      "correct": false,
+      "actual_return": 0.0588,
+      "portfolio_return": 0.0,
+      "days_held": 3
+    },
+    {
+      "ticker": "SBUX",
+      "entry_date": "2025-08-08",
+      "error": "Failed to parse prediction",
+      "correct": false,
+      "actual_return": 2.2362,
+      "portfolio_return": 0.0,
+      "days_held": 3
+    },
+    {
+      "ticker": "HD",
+      "entry_date": "2025-09-05",
+      "predicted_action": "buy",
+      "actual_return": -1.3653,
+      "portfolio_return": -1.3653,
+      "correct": false,
+      "reasoning": "Based on comprehensive technical analysis of HD stock from April 2025 through September 2025, the stock demonstrates a strong bullish trend with consistent upward momentum. The stock has risen from the $350-360 range in late April/early May to the $400-410 range by late August/early September, representing approximately 15-20% appreciation over this period. Key technical indicators support continued strength: the current price of $406.77 (as of 2025-09-05) remains well above both the 20-day SMA ($398.52) and EMA ($398.29), indicating sustained upward momentum. The RSI at 62.6 suggests the stock is approaching overbought territory but still has room for further gains before reaching extreme levels. Volume patterns show healthy participation during upward moves, particularly during the breakout above $400. The positive yield curve (+0.59%) provides a favorable macroeconomic backdrop for equities. While the stock has experienced some volatility with periodic pullbacks of 3-5%, each decline has been followed by recovery to new higher levels, establishing a pattern of higher highs and higher lows.",
+      "support": "Price appreciation from $359 (May) to $407 (September) represents strong 13.4% gain; Current price $406.77 trading above both SMA20 ($398.52) and EMA20 ($398.29) by approximately 2%; RSI at 62.6 indicates bullish momentum without being overbought (>70); Consistent pattern of higher highs ($420.40 peak) and higher lows; Positive yield curve environment supportive for equity investments; Volume spikes during upward moves confirm institutional participation",
+      "usage": {
+        "prompt_tokens": 8564,
+        "completion_tokens": 349,
+        "total_tokens": 8913
+      },
+      "ground_truth": {
+        "actual_return_pct": -1.3653,
+        "exit_date": "2025-09-10",
+        "days_held": 3,
+        "early_exit": false,
+        "entry_price": 418.95,
+        "exit_price": 413.23
+      },
+      "days_held": 3
+    },
+    {
+      "ticker": "HD",
+      "entry_date": "2025-09-10",
+      "predicted_action": "buy",
+      "actual_return": 2.2893,
+      "portfolio_return": 2.2893,
+      "correct": true,
+      "reasoning": "HD stock has demonstrated a strong technical uptrend over the past several months, with the current price of $408.24 (as of 2025-09-03) significantly above both the 20-day SMA ($394.87) and EMA ($396.34), indicating sustained bullish momentum. The stock has recovered from a low of approximately $347 in late June to current levels above $400, representing a gain of over 17%. The RSI has moderated from overbought levels above 80 in mid-August to a healthier 64.3, suggesting reduced near-term selling pressure. Volume patterns show consistent investor interest, with higher volume during upward moves. The positive yield curve (+0.50%) indicates favorable macroeconomic conditions for equities. While the stock has pulled back slightly from recent highs above $420, the overall technical structure remains constructive with higher lows established since June.",
+      "support": "Key supporting metrics: 1) Price trading 3.4% above 20-day SMA and 3.0% above 20-day EMA confirming uptrend; 2) Strong recovery from June lows of ~$347 to current $408+ level; 3) RSI at 64.3 indicates bullish momentum without extreme overbought conditions; 4) Consistent higher volume on upward moves (24.6M shares during August rally); 5) Positive yield curve environment supporting equity investments.",
+      "usage": {
+        "prompt_tokens": 10220,
+        "completion_tokens": 299,
+        "total_tokens": 10519
+      },
+      "ground_truth": {
+        "actual_return_pct": 2.2893,
+        "exit_date": "2025-09-12",
+        "days_held": 2,
+        "early_exit": true,
+        "entry_price": 413.23,
+        "exit_price": 422.69
+      },
+      "days_held": 2
+    },
+    {
+      "ticker": "HD",
+      "entry_date": "2025-09-12",
+      "error": "Failed to parse prediction",
+      "correct": false,
+      "actual_return": -1.3461,
+      "portfolio_return": 0.0,
+      "days_held": 3
+    },
+    {
+      "ticker": "HD",
+      "entry_date": "2025-09-16",
+      "predicted_action": "buy",
+      "actual_return": -1.3667,
+      "portfolio_return": -1.3667,
+      "correct": false,
+      "reasoning": "HD stock shows a clear upward technical trend over the analyzed period, with the price rising from approximately $360 in June 2025 to $415 in September 2025, representing a 15%+ gain. The current price of $407.71 remains well above both the 20-day SMA ($400.91) and EMA ($399.88), indicating sustained bullish momentum. While the RSI at 50.5 suggests neutral momentum (not overbought), the stock has demonstrated resilience during minor pullbacks. The yield curve remains positively sloped (+0.53%), supporting a favorable economic environment for home improvement retailers. Volume patterns show consistent investor interest, particularly during upward moves. The technical setup suggests potential for continued appreciation toward recent highs around $425.",
+      "support": "Key supporting metrics: 1) Price trading 6.8% above 20-day SMA ($407.71 vs $400.91), 2) Strong upward trajectory from June lows ($356.96) to September highs ($425.22), 3) Neutral RSI (50.5) leaves room for further upside, 4) Positive yield curve (+0.53%) supports housing and home improvement sectors, 5) Recent consolidation near $410-415 levels provides potential base for next leg higher.",
+      "usage": {
+        "prompt_tokens": 10220,
+        "completion_tokens": 277,
+        "total_tokens": 10497
+      },
+      "ground_truth": {
+        "actual_return_pct": -1.3667,
+        "exit_date": "2025-09-19",
+        "days_held": 3,
+        "early_exit": false,
+        "entry_price": 421.45,
+        "exit_price": 415.69
+      },
+      "days_held": 3
+    },
+    {
+      "ticker": "SBUX",
+      "entry_date": "2025-08-20",
+      "error": "Failed to parse prediction",
+      "correct": false,
+      "actual_return": -4.1336,
+      "portfolio_return": 0.0,
+      "days_held": 3
+    },
+    {
+      "ticker": "HD",
+      "entry_date": "2025-09-23",
+      "predicted_action": "buy",
+      "actual_return": -0.1996,
+      "portfolio_return": -0.1996,
+      "correct": false,
+      "reasoning": "HD stock has demonstrated a strong bullish trend over the analyzed period (May through September 2025), with the price increasing from approximately $366 in late May to $417 by late September, representing a gain of about 14%. The technical indicators are particularly compelling: the current price of $417 is trading well above both the 20-day Simple Moving Average ($412.58) and Exponential Moving Average ($412.06), indicating sustained upward momentum. The RSI of 61.3 is in neutral territory, suggesting room for further appreciation without being overbought. Volume has been consistently strong, averaging over 18 million shares weekly, confirming institutional interest. The positive yield curve (+0.59%) indicates a healthy economic environment supportive of home improvement spending. While fundamental data is unavailable, HD's market leadership in the home improvement sector provides defensive characteristics during economic uncertainty.",
+      "support": "Key supporting metrics: 14% price appreciation over 4 months; current price ($417) trading above both SMA20 ($412.58) and EMA20 ($412.06); RSI at 61.3 indicating healthy momentum without overbought conditions; consistent strong volume averaging 18M+ shares weekly; positive macroeconomic backdrop with upward-sloping yield curve (+0.59%); established market leadership position in resilient home improvement sector.",
+      "usage": {
+        "prompt_tokens": 10220,
+        "completion_tokens": 280,
+        "total_tokens": 10500
+      },
+      "ground_truth": {
+        "actual_return_pct": -0.1996,
+        "exit_date": "2025-09-26",
+        "days_held": 3,
+        "early_exit": false,
+        "entry_price": 410.91,
+        "exit_price": 410.09
+      },
+      "days_held": 3
+    },
+    {
+      "ticker": "HD",
+      "entry_date": "2025-10-06",
+      "predicted_action": "buy",
+      "actual_return": -2.9898,
+      "portfolio_return": -2.9898,
+      "correct": false,
+      "reasoning": "HD's technical analysis reveals a volatile but generally upward trending pattern over the past several months. The stock has shown significant price appreciation from lows around $350 in late June 2025 to current levels above $400. Key observations include: RSI readings have moderated from overbought conditions (above 70) to neutral levels (current RSI 53.8), suggesting reduced buying pressure but not oversold conditions. The stock is currently trading slightly below its 20-day SMA ($414.33) but above its 20-day EMA ($412.61), indicating potential support levels. Volume patterns show consistent institutional interest during price advances. The positive yield curve (+0.58%) suggests favorable macroeconomic conditions for growth stocks. However, the absence of fundamental data limits full assessment of valuation metrics.",
+      "support": "1) Strong recovery from June lows of ~$350 to current $410+ levels represents ~17% appreciation 2) Technical indicators show healthy consolidation after recent gains with RSI at neutral 53.8 3) Stock maintaining position above key EMA support at $412.61 4) Positive yield curve environment supportive for home improvement sector 5) Consistent volume patterns indicate sustained institutional interest 6) Recent weeks show ability to hold gains above $400 support level",
+      "usage": {
+        "prompt_tokens": 10220,
+        "completion_tokens": 272,
+        "total_tokens": 10492
+      },
+      "ground_truth": {
+        "actual_return_pct": -2.9898,
+        "exit_date": "2025-10-09",
+        "days_held": 3,
+        "early_exit": false,
+        "entry_price": 389.33,
+        "exit_price": 377.69
+      },
+      "days_held": 3
+    }
+  ]
+}

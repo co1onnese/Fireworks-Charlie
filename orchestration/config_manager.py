@@ -33,6 +33,7 @@ class Config:
         self.FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
         self.NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
         self.SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+        self.BENZINGA_API_KEY = os.environ.get("BENZINGA_API_KEY", "")
 
         # ====== LLM Provider Configuration ======
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "deepseek").lower()

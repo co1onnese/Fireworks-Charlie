@@ -13,6 +13,8 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 
+from rlvr.response_adapter import validate_structured_response
+
 logger = logging.getLogger(__name__)
 
 
@@ -216,10 +218,23 @@ def validate_dev_example(example: Dict[str, Any]) -> Tuple[bool, List[str]]:
                 # Validate assistant response is valid JSON
                 try:
                     assistant_data = json.loads(messages[2]["content"])
-                    required_fields = ["reasoning", "action", "support"]
-                    for field in required_fields:
-                        if field not in assistant_data:
-                            errors.append(f"Missing '{field}' in assistant response")
+                    
+                    # Check if it's structured format (5-7 sections) or legacy format
+                    is_structured = all(section in assistant_data for section in 
+                                       ["fundamentals", "technical", "news", "valuation", 
+                                        "risk_assessment", "macro", "conclusion"])
+                    
+                    if is_structured:
+                        # Validate structured format
+                        is_valid, struct_errors = validate_structured_response(assistant_data)
+                        if not is_valid:
+                            errors.extend([f"Structured format error: {e}" for e in struct_errors])
+                    else:
+                        # Validate legacy format
+                        required_fields = ["reasoning", "action", "support"]
+                        for field in required_fields:
+                            if field not in assistant_data:
+                                errors.append(f"Missing '{field}' in assistant response (legacy format)")
                 except json.JSONDecodeError:
                     errors.append("Assistant response is not valid JSON")
     
@@ -528,6 +543,21 @@ Provide your recommendation as JSON with reasoning, action, and supporting evide
     return examples
 
 
+def validate_structured_response_format(structured_response: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """
+    Validate that a structured response (5-7 section format) has required sections and correct format.
+    
+    This is a wrapper around the response_adapter validation function for convenience.
+    
+    Args:
+        structured_response: Response dictionary to validate
+        
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    return validate_structured_response(structured_response)
+
+
 # Export functions
 __all__ = [
     "create_training_example",
@@ -535,6 +565,7 @@ __all__ = [
     "validate_training_example",
     "validate_dev_example",
     "validate_fireworks_format",
+    "validate_structured_response_format",
     "format_example_for_jsonl",
     "write_jsonl_file",
     "read_jsonl_file",

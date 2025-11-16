@@ -12,6 +12,7 @@ from .database_manager import DatabaseManager
 from .data_processor import DataProcessor
 from .eodhd_client import EODHDClient
 from .fred_client import FREDClient
+from .benzinga_client import BenzingaClient
 from .feature_engineering import FeatureEngineer
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class DataOrchestrator:
         self.db_manager = DatabaseManager(config.DB_URL)
         self.eodhd_client = EODHDClient(config.EODHD_API_KEY) if config.EODHD_API_KEY else None
         self.fred_client = FREDClient(config.FRED_API_KEY) if config.FRED_API_KEY else None
+        self.benzinga_client = BenzingaClient(config.BENZINGA_API_KEY) if config.BENZINGA_API_KEY else None
         
         # FRED series to fetch
         self.fred_series = [
@@ -284,6 +286,11 @@ class DataOrchestrator:
             session.commit()
             logger.info(f"Ticker {ticker} metadata stored")
             
+            # Initialize variables for return statement
+            eod_processed = []
+            news_processed = []
+            insider_processed = []
+            
             # 2. Fetch and process Technical Market Data (with extended lookback)
             if self.eodhd_client:
                 eod_raw = self.eodhd_client.get_eod_data(
@@ -337,7 +344,7 @@ class DataOrchestrator:
                 else:
                     logger.info(f"Raw news API returned {len(news_raw)} articles for {ticker}")
                 
-                news_processed = processor.process_news(news_raw, f"{ticker}.US")
+                news_processed = processor.process_news(news_raw or [], f"{ticker}.US")
                 
                 if news_processed:
                     logger.info(f"Processed {len(news_processed)} news articles after filtering for {ticker}")
@@ -368,6 +375,45 @@ class DataOrchestrator:
                 session.commit()
                 logger.info(f"Stored {len(insider_processed)} insider transactions")
             
+            # 6. Fetch and process Analyst Recommendations (Benzinga API)
+            analyst_processed = []
+            if self.benzinga_client:
+                logger.info(f"Fetching analyst recommendations for {ticker} from {start_date} to {end_date}")
+                
+                try:
+                    analyst_raw = self.benzinga_client.get_analyst_insights(
+                        symbols=[ticker],
+                        start_date=start_date.strftime("%Y-%m-%d"),
+                        end_date=end_date.strftime("%Y-%m-%d"),
+                        page_size=100
+                    )
+                    
+                    if not analyst_raw:
+                        logger.info(f"No analyst recommendations returned from Benzinga API for {ticker}")
+                    else:
+                        logger.info(f"Raw Benzinga API returned {len(analyst_raw)} analyst insights for {ticker}")
+                        
+                        analyst_processed = processor.process_analyst_recommendations(analyst_raw, ticker)
+                        
+                        if analyst_processed:
+                            logger.info(f"Processed {len(analyst_processed)} analyst recommendations after filtering for {ticker}")
+                            
+                            # Add ticker_id to each recommendation
+                            for rec in analyst_processed:
+                                rec["ticker_id"] = ticker_obj.ticker_id
+                            
+                            self.db_manager.insert_analyst_recommendations(session, ticker_obj.ticker_id, analyst_processed)
+                            session.commit()
+                            logger.info(f"Successfully stored {len(analyst_processed)} analyst recommendations in database for {ticker}")
+                        else:
+                            logger.info(f"No analyst recommendations passed filtering/processing for {ticker}")
+                            
+                except Exception as e:
+                    logger.warning(f"Error fetching analyst recommendations for {ticker}: {e}")
+                    # Don't fail the entire collection if analyst recommendations fail
+            else:
+                logger.debug("Benzinga client not available, skipping analyst recommendations")
+            
             return {
                 "status": "success",
                 "ticker": ticker,
@@ -376,6 +422,7 @@ class DataOrchestrator:
                     "technical": len(eod_processed) if self.eodhd_client else 0,
                     "news": len(news_processed) if self.eodhd_client else 0,
                     "insider": len(insider_processed) if self.eodhd_client else 0,
+                    "analyst_recommendations": len(analyst_processed) if self.benzinga_client else 0,
                 }
             }
             

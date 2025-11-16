@@ -1,0 +1,266 @@
+======================================================================
+BASELINE MODEL EVALUATION SUMMARY
+======================================================================
+
+Evaluated at: 2025-11-14T12:29:52.475006
+Model: accounts/lstn/deployedModels/ft-mhkk2kzf-3w4yk-my7vo15h
+Strategy: C
+Dataset: storage/rlvr_datasets/dev.jsonl
+
+OVERALL PERFORMANCE
+----------------------------------------------------------------------
+Total Examples: 402
+Successfully Evaluated: 269
+Errors: 133
+Accuracy: 54.28%
+Correct: 146/269
+Incorrect: 123
+
+PORTFOLIO PERFORMANCE
+----------------------------------------------------------------------
+Mean Return: -0.0058%
+Median Return: 0.0000%
+Std Dev: 0.4873%
+Min Return: -2.8982%
+Max Return: 3.5172%
+Total Cumulative Return: -1.5580%
+Sharpe Ratio: -0.0119
+
+Position Distribution:
+  Positive Returns: 10 (3.7%)
+  Negative Returns: 14 (5.2%)
+  Neutral (0%) Returns: 245 (91.1%)
+
+ACTION STATISTICS
+----------------------------------------------------------------------
+HOLD:
+  Count: 213
+  Accuracy: 66.67%
+  Correct: 142/213
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BUY:
+  Count: 21
+  Accuracy: 14.29%
+  Correct: 3/21
+  Mean Portfolio Return: -0.1242%
+  Std Portfolio Return: 1.6327%
+
+NHOLD:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLD A:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+ HOLD:
+  Count: 3
+  Accuracy: 0.00%
+  Correct: 0/3
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLE:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLDR:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLDW:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLD::
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+MICROSOFT HOLD:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+SELL:
+  Count: 3
+  Accuracy: 33.33%
+  Correct: 1/3
+  Mean Portfolio Return: 0.3501%
+  Std Portfolio Return: 2.1953%
+
+HOLDER:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+MOLD:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BEAR_BUY:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HIDE:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLDK:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+...:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+PULL:
+  Count: 3
+  Accuracy: 0.00%
+  Correct: 0/3
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+FENCE:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLDURBAN:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+NOLD:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+NICOLO:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+UNIVERSITY:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BEAR:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+TUNNEL:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BUYN:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+HOLDS:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+PUT:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+ELECTRONIC BUY FOR SHORT-TERM TRADE:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+GRIND:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BUDGET:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BUY-AND-HOLD BENCHMARK
+----------------------------------------------------------------------
+Mean Return: -0.1627%
+Std Dev: 2.3035%
+Sharpe Ratio: -0.0706
+
+COMPARISON TO BENCHMARK
+----------------------------------------------------------------------
+Mean Return Difference: +0.1569%
+Sharpe Ratio Difference: +0.0587
+✓ Model outperforms buy-and-hold on mean return
+✓ Model has better risk-adjusted returns
+
+======================================================================

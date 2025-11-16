@@ -1,0 +1,70 @@
+======================================================================
+BASELINE MODEL EVALUATION SUMMARY
+======================================================================
+
+Evaluated at: 2025-11-05T08:46:42.200921
+Model: accounts/fireworks/models/deepseek-v3p1-terminus
+Strategy: A
+Dataset: storage/rlvr_datasets/dev.jsonl
+
+OVERALL PERFORMANCE
+----------------------------------------------------------------------
+Total Examples: 402
+Successfully Evaluated: 281
+Errors: 121
+Accuracy: 20.64%
+Correct: 58/281
+Incorrect: 223
+
+PORTFOLIO PERFORMANCE
+----------------------------------------------------------------------
+Mean Return: -0.0431%
+Median Return: 0.0000%
+Std Dev: 1.5725%
+Min Return: -6.9195%
+Max Return: 5.6080%
+Total Cumulative Return: -12.1246%
+Sharpe Ratio: -0.0274
+
+Position Distribution:
+  Positive Returns: 88 (31.3%)
+  Negative Returns: 100 (35.6%)
+  Neutral (0%) Returns: 93 (33.1%)
+
+ACTION STATISTICS
+----------------------------------------------------------------------
+BUY:
+  Count: 188
+  Accuracy: 11.17%
+  Correct: 21/188
+  Mean Portfolio Return: -0.0645%
+  Std Portfolio Return: 1.9238%
+
+HOLD:
+  Count: 76
+  Accuracy: 47.37%
+  Correct: 36/76
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+SELL:
+  Count: 17
+  Accuracy: 5.88%
+  Correct: 1/17
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+BUY-AND-HOLD BENCHMARK
+----------------------------------------------------------------------
+Mean Return: -0.0946%
+Std Dev: 2.2996%
+Sharpe Ratio: -0.0411
+
+COMPARISON TO BENCHMARK
+----------------------------------------------------------------------
+Mean Return Difference: +0.0515%
+Sharpe Ratio Difference: +0.0137
+✓ Model outperforms buy-and-hold on mean return
+✓ Model has better risk-adjusted returns
+
+======================================================================

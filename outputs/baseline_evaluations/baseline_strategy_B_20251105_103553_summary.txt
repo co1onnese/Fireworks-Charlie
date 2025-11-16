@@ -1,0 +1,84 @@
+======================================================================
+BASELINE MODEL EVALUATION SUMMARY
+======================================================================
+
+Evaluated at: 2025-11-05T10:35:53.229087
+Model: accounts/fireworks/models/deepseek-v3p1-terminus
+Strategy: B
+Dataset: storage/rlvr_datasets/dev.jsonl
+
+OVERALL PERFORMANCE
+----------------------------------------------------------------------
+Total Examples: 402
+Successfully Evaluated: 264
+Errors: 138
+Accuracy: 27.65%
+Correct: 73/264
+Incorrect: 191
+
+PORTFOLIO PERFORMANCE
+----------------------------------------------------------------------
+Mean Return: 0.0294%
+Median Return: 0.0000%
+Std Dev: 1.8117%
+Min Return: -10.0899%
+Max Return: 6.9195%
+Total Cumulative Return: 7.7645%
+Sharpe Ratio: 0.0162
+
+Position Distribution:
+  Positive Returns: 99 (37.5%)
+  Negative Returns: 94 (35.6%)
+  Neutral (0%) Returns: 71 (26.9%)
+
+ACTION STATISTICS
+----------------------------------------------------------------------
+BUY:
+  Count: 173
+  Accuracy: 13.87%
+  Correct: 24/173
+  Mean Portfolio Return: -0.0011%
+  Std Portfolio Return: 2.0839%
+
+HOLD:
+  Count: 71
+  Accuracy: 63.38%
+  Correct: 45/71
+  Mean Portfolio Return: 0.0000%
+  Std Portfolio Return: 0.0000%
+
+SELL:
+  Count: 18
+  Accuracy: 22.22%
+  Correct: 4/18
+  Mean Portfolio Return: 0.6234%
+  Std Portfolio Return: 2.3056%
+
+STRONG_BUY:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: -4.2578%
+  Std Portfolio Return: 0.0000%
+
+STRONG_SELL:
+  Count: 1
+  Accuracy: 0.00%
+  Correct: 0/1
+  Mean Portfolio Return: 0.9926%
+  Std Portfolio Return: 0.0000%
+
+BUY-AND-HOLD BENCHMARK
+----------------------------------------------------------------------
+Mean Return: -0.1807%
+Std Dev: 2.2966%
+Sharpe Ratio: -0.0787
+
+COMPARISON TO BENCHMARK
+----------------------------------------------------------------------
+Mean Return Difference: +0.2101%
+Sharpe Ratio Difference: +0.0949
+✓ Model outperforms buy-and-hold on mean return
+✓ Model has better risk-adjusted returns
+
+======================================================================

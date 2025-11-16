@@ -393,6 +393,103 @@ class DataProcessor:
         processed_data = df[columns].to_dict(orient="records")
         return processed_data
 
+    def process_analyst_recommendations(self, raw_data: list, symbol: str) -> list:
+        """
+        Processes raw analyst recommendations data from Benzinga API.
+        
+        Expected raw_data format from Benzinga API:
+        [{
+            'id': 'uuid',
+            'action': 'Reiterates',
+            'rating': 'Buy',
+            'pt': '155.00',
+            'analyst_insights': '...',
+            'firm': 'Goldman Sachs',
+            'firm_id': '...',
+            'rating_id': '...',
+            'date': '2024-02-15',
+            'updated': 1708018876,
+            'security': {'symbol': 'AAPL', ...}
+        }]
+        
+        Args:
+            raw_data: List of analyst insight dictionaries from Benzinga API
+            symbol: Ticker symbol (e.g., "AAPL")
+            
+        Returns:
+            List of processed analyst recommendation dictionaries
+        """
+        if not raw_data:
+            logger.debug(f"No raw analyst recommendations data to process for {symbol}")
+            return []
+
+        initial_count = len(raw_data)
+        logger.debug(f"Processing {initial_count} raw analyst recommendations for {symbol}")
+
+        processed_data = []
+        symbol_clean = symbol.split(".")[0].upper()
+
+        for insight in raw_data:
+            try:
+                # Validate that this insight is for the requested symbol
+                security = insight.get("security", {})
+                insight_symbol = security.get("symbol", "").upper()
+                
+                if insight_symbol != symbol_clean:
+                    logger.debug(f"Skipping insight for {insight_symbol} (requested {symbol_clean})")
+                    continue
+
+                # Parse date
+                date_str = insight.get("date", "")
+                if not date_str:
+                    logger.warning(f"Skipping insight with missing date: {insight.get('id')}")
+                    continue
+                
+                try:
+                    insight_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    logger.warning(f"Invalid date format '{date_str}' for insight {insight.get('id')}")
+                    continue
+
+                # Filter by date range
+                if insight_date < self.start_date.date() or insight_date > self.end_date.date():
+                    continue
+
+                # Parse target price (pt field is string, convert to float)
+                target_price = None
+                pt_str = insight.get("pt", "")
+                if pt_str:
+                    try:
+                        target_price = float(pt_str)
+                    except (ValueError, TypeError):
+                        logger.debug(f"Could not parse target price '{pt_str}' for insight {insight.get('id')}")
+
+                # Extract action field
+                action = insight.get("action", "").strip()
+
+                record = {
+                    "symbol": symbol_clean,
+                    "date": insight_date,
+                    "firm": insight.get("firm", ""),
+                    "firm_id": insight.get("firm_id"),
+                    "analyst_insight_id": insight.get("id"),  # UUID from Benzinga
+                    "rating_id": insight.get("rating_id"),
+                    "action": action,
+                    "rating": insight.get("rating", ""),  # "Buy", "Hold", "Sell", etc.
+                    "target_price": target_price,
+                    "analyst_insights": insight.get("analyst_insights", ""),  # Full text
+                    "updated_timestamp": insight.get("updated"),  # Unix timestamp
+                }
+
+                processed_data.append(record)
+
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Error processing analyst recommendation for {symbol}: {e}")
+                continue
+
+        logger.info(f"Processed {len(processed_data)} analyst recommendation records for {symbol} (from {initial_count} raw insights)")
+        return processed_data
+
     def process_macro_indicators(
         self, raw_data: list, country: str, indicator_name: str
     ) -> list:

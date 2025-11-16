@@ -47,6 +47,7 @@ class Ticker(Base):
     fundamentals = relationship("Fundamental", back_populates="ticker", cascade="all, delete-orphan")
     news = relationship("News", back_populates="ticker", cascade="all, delete-orphan")
     insider_transactions = relationship("InsiderTransaction", back_populates="ticker", cascade="all, delete-orphan")
+    analyst_recommendations = relationship("AnalystRecommendation", back_populates="ticker", cascade="all, delete-orphan")
     thesis_generations = relationship("ThesisGeneration", back_populates="ticker", cascade="all, delete-orphan")
     positions = relationship("Position", back_populates="ticker", cascade="all, delete-orphan")
     rlvr_examples = relationship("RLVRTrainingExample", back_populates="ticker", cascade="all, delete-orphan")
@@ -85,6 +86,10 @@ class MarketData(Base):
     macd_signal = Column(Numeric(18, 4))
     bollinger_upper = Column(Numeric(18, 4))
     bollinger_lower = Column(Numeric(18, 4))
+    atr_14 = Column(Numeric(18, 4))  # Average True Range (14-period)
+    adx_14 = Column(Numeric(18, 4))  # Average Directional Index (14-period)
+    di_plus_14 = Column(Numeric(18, 4))  # Plus Directional Indicator (14-period)
+    di_minus_14 = Column(Numeric(18, 4))  # Minus Directional Indicator (14-period)
 
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -337,6 +342,41 @@ class InsiderTransaction(Base):
 
     def __repr__(self):
         return f"<InsiderTransaction(ticker_id={self.ticker_id}, owner='{self.owner_name}', code='{self.transaction_code}')>"
+
+
+class AnalystRecommendation(Base):
+    """Analyst recommendations and insights from Benzinga API"""
+    __tablename__ = 'analyst_recommendations'
+    __table_args__ = (
+        UniqueConstraint('ticker_id', 'date', 'firm_id', 'analyst_insight_id', name='uq_analyst_recommendation'),
+        Index('idx_analyst_recs_ticker_date', 'ticker_id', 'date'),
+        Index('idx_analyst_recs_date', 'date'),
+        Index('idx_analyst_recs_firm', 'firm'),
+        Index('idx_analyst_recs_rating', 'rating'),
+        Index('idx_analyst_recs_action', 'action'),
+    )
+
+    recommendation_id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker_id = Column(Integer, ForeignKey('tickers.ticker_id', ondelete='CASCADE'), nullable=False)
+
+    date = Column(Date, nullable=False)
+    firm = Column(String(100), nullable=False)
+    firm_id = Column(String(100))
+    analyst_insight_id = Column(String(100), unique=True)  # Benzinga insight ID (UUID)
+    rating_id = Column(String(100))  # Benzinga rating ID
+    action = Column(String(50))  # "Reiterates", "Upgrades", "Downgrades", "Maintains", "Initiates"
+    rating = Column(String(50))  # "Buy", "Hold", "Sell", "Strong Buy", "Strong Sell", etc.
+    target_price = Column(Numeric(18, 4))  # From "pt" field
+    analyst_insights = Column(Text)  # Full insight text
+    updated_timestamp = Column(BigInteger)  # Unix timestamp from "updated" field
+
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+    # Relationships
+    ticker = relationship("Ticker", back_populates="analyst_recommendations")
+
+    def __repr__(self):
+        return f"<AnalystRecommendation(ticker_id={self.ticker_id}, firm='{self.firm}', rating='{self.rating}', date={self.date})>"
 
 
 # ============================================================================
@@ -899,6 +939,62 @@ class DatabaseManager:
                 logger.debug(f"Inserted insider transaction for ticker {ticker_id}: {owner_name}")
             else:
                 logger.debug(f"Insider transaction for ticker {ticker_id} already exists: {owner_name}")
+
+    def insert_analyst_recommendations(
+        self,
+        session: Session,
+        ticker_id: int,
+        recommendations: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Insert analyst recommendations for a ticker.
+        
+        Args:
+            session: Database session
+            ticker_id: Ticker ID
+            recommendations: List of recommendation dictionaries from data processor
+        """
+        if not recommendations:
+            logger.debug(f"No analyst recommendations to insert for ticker {ticker_id}")
+            return
+
+        inserted_count = 0
+        for rec_data in recommendations:
+            # Check if recommendation already exists by analyst_insight_id (unique constraint)
+            analyst_insight_id = rec_data.get('analyst_insight_id')
+            if analyst_insight_id:
+                existing = session.query(AnalystRecommendation).filter(
+                    AnalystRecommendation.analyst_insight_id == analyst_insight_id
+                ).first()
+            else:
+                # Fallback: check by ticker_id + date + firm_id combination
+                existing = session.query(AnalystRecommendation).filter(
+                    AnalystRecommendation.ticker_id == ticker_id,
+                    AnalystRecommendation.date == rec_data.get('date'),
+                    AnalystRecommendation.firm_id == rec_data.get('firm_id')
+                ).first()
+
+            if not existing:
+                recommendation_record = AnalystRecommendation(
+                    ticker_id=ticker_id,
+                    date=rec_data.get('date'),
+                    firm=rec_data.get('firm', ''),
+                    firm_id=rec_data.get('firm_id'),
+                    analyst_insight_id=rec_data.get('analyst_insight_id'),
+                    rating_id=rec_data.get('rating_id'),
+                    action=rec_data.get('action'),
+                    rating=rec_data.get('rating'),
+                    target_price=rec_data.get('target_price'),
+                    analyst_insights=rec_data.get('analyst_insights'),
+                    updated_timestamp=rec_data.get('updated_timestamp')
+                )
+                session.add(recommendation_record)
+                inserted_count += 1
+                logger.debug(f"Inserted analyst recommendation for ticker {ticker_id} from {rec_data.get('firm')} on {rec_data.get('date')}")
+            else:
+                logger.debug(f"Analyst recommendation already exists for ticker {ticker_id} from {rec_data.get('firm')} on {rec_data.get('date')}")
+        
+        logger.info(f"Inserted {inserted_count} new analyst recommendations for ticker {ticker_id}")
 
     def insert_technical_market_data(
         self,

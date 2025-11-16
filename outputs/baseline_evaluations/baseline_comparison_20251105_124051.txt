@@ -1,0 +1,72 @@
+======================================================================
+BASELINE MODEL STRATEGY COMPARISON REPORT
+======================================================================
+
+Model: accounts/fireworks/models/deepseek-v3p1-terminus
+Evaluated at: 2025-11-05T12:40:51.452066
+Strategies Compared: A, B, C
+
+SUMMARY COMPARISON
+----------------------------------------------------------------------
+Strategy     Accuracy     Mean Return     Sharpe Ratio
+----------------------------------------------------------------------
+A                20.64%       -0.0431%     -0.0274
+B                27.65%        0.0294%      0.0162
+C                21.21%       -0.1109%     -0.0657
+----------------------------------------------------------------------
+
+
+STRATEGY A - DETAILED RESULTS
+----------------------------------------------------------------------
+Accuracy: 20.64% (58/281)
+Mean Return: -0.0431%
+Total Return: -12.1246%
+Std Dev: 1.5725%
+Sharpe Ratio: -0.0274
+Errors: 121
+
+Action Distribution:
+  buy: 188 (11.2% accuracy)
+  hold: 76 (47.4% accuracy)
+  sell: 17 (5.9% accuracy)
+
+
+STRATEGY B - DETAILED RESULTS
+----------------------------------------------------------------------
+Accuracy: 27.65% (73/264)
+Mean Return: 0.0294%
+Total Return: 7.7645%
+Std Dev: 1.8117%
+Sharpe Ratio: 0.0162
+Errors: 138
+
+Action Distribution:
+  buy: 173 (13.9% accuracy)
+  hold: 71 (63.4% accuracy)
+  sell: 18 (22.2% accuracy)
+  strong_buy: 1 (0.0% accuracy)
+  strong_sell: 1 (0.0% accuracy)
+
+
+STRATEGY C - DETAILED RESULTS
+----------------------------------------------------------------------
+Accuracy: 21.21% (56/264)
+Mean Return: -0.1109%
+Total Return: -29.2843%
+Std Dev: 1.6891%
+Sharpe Ratio: -0.0657
+Errors: 138
+
+Action Distribution:
+  buy: 190 (12.1% accuracy)
+  hold: 63 (47.6% accuracy)
+  sell: 11 (27.3% accuracy)
+
+
+RECOMMENDATIONS
+----------------------------------------------------------------------
+Best Accuracy: Strategy B (27.65%)
+Best Mean Return: Strategy B (0.0294%)
+Best Sharpe Ratio: Strategy B (0.0162)
+
+======================================================================

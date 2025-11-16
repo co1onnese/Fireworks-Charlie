@@ -1,0 +1,159 @@
+======================================================================
+BASELINE MODEL STRATEGY COMPARISON REPORT
+======================================================================
+
+Model: accounts/lstn/deployedModels/ft-mhkk2kzf-3w4yk-my7vo15h
+Evaluated at: 2025-11-14T12:29:52.475527
+Strategies Compared: A, B, C
+
+SUMMARY COMPARISON
+----------------------------------------------------------------------
+Strategy     Accuracy     Mean Return     Sharpe Ratio
+----------------------------------------------------------------------
+A                60.07%        0.0736%      0.1065
+B                55.56%       -0.0127%     -0.0213
+C                54.28%       -0.0058%     -0.0119
+----------------------------------------------------------------------
+
+
+STRATEGY A - DETAILED RESULTS
+----------------------------------------------------------------------
+Accuracy: 60.07% (164/273)
+Mean Return: 0.0736%
+Total Return: 20.0847%
+Std Dev: 0.6906%
+Sharpe Ratio: 0.1065
+Errors: 129
+
+Action Distribution:
+  hold: 218 (71.1% accuracy)
+  buy: 27 (25.9% accuracy)
+  chhold: 1 (0.0% accuracy)
+   hold: 2 (0.0% accuracy)
+  holdk: 1 (0.0% accuracy)
+  hod: 1 (0.0% accuracy)
+  holdaligned: 1 (0.0% accuracy)
+  colder: 1 (0.0% accuracy)
+  hold the current price action and momentum signals a potential pullback or consolidation phase. the stock is neither oversold nor overbought, but the recent rally from june lows may need a breather macross the board. the macroeconomic indicators are friendly, but the short-term tea leaves suggest a pause for ma.: 1 (0.0% accuracy)
+  hold_sell: 1 (0.0% accuracy)
+  bridge: 1 (0.0% accuracy)
+  ell: 1 (0.0% accuracy)
+  buykey: 1 (0.0% accuracy)
+  hold.: 1 (0.0% accuracy)
+  strong_sell: 1 (100.0% accuracy)
+  holder: 1 (0.0% accuracy)
+  holdv: 1 (0.0% accuracy)
+  shell: 1 (0.0% accuracy)
+  temperary hold: 1 (0.0% accuracy)
+  holding: 1 (0.0% accuracy)
+  hol d: 1 (0.0% accuracy)
+  holdmad: 1 (0.0% accuracy)
+  holdkey: 1 (0.0% accuracy)
+  sell: 1 (100.0% accuracy)
+  buyk: 1 (0.0% accuracy)
+  holdipoint: 1 (0.0% accuracy)
+  biased_hold: 1 (0.0% accuracy)
+  _hold: 1 (0.0% accuracy)
+  holds: 1 (0.0% accuracy)
+
+
+STRATEGY B - DETAILED RESULTS
+----------------------------------------------------------------------
+Accuracy: 55.56% (155/279)
+Mean Return: -0.0127%
+Total Return: -3.5392%
+Std Dev: 0.5950%
+Sharpe Ratio: -0.0213
+Errors: 123
+
+Action Distribution:
+  hold: 219 (68.9% accuracy)
+  buy: 22 (18.2% accuracy)
+  neutral: 1 (0.0% accuracy)
+  british: 1 (0.0% accuracy)
+  bridge: 1 (0.0% accuracy)
+  holdg: 1 (0.0% accuracy)
+  buy_buy: 1 (0.0% accuracy)
+  holding: 1 (0.0% accuracy)
+  baby_cell: 1 (0.0% accuracy)
+  bear: 1 (0.0% accuracy)
+  ride: 1 (0.0% accuracy)
+  mold: 2 (0.0% accuracy)
+  holdurban: 1 (0.0% accuracy)
+  business_social: 1 (0.0% accuracy)
+  technical data suggests mastercard is in a consolidation phase with mixed signals. while the stock dmiad ( direction movement index) is not given, the rsi of 58.1 indicates neutral territory. the price has shown resilience by staying above the 20-day sma and ema, which are key support levels. myriad weekly changes show slight variability but no clear directional trend. given the lack of fundamental data, the technical evidence supports a hold recommendation as the stock lacks a clear catalyst for significant movement directionally. the current yield curve at 0.54% is positive yet low, suggesting moderate growth expectations, aligning with the technical indicators.: 1 (0.0% accuracy)
+  holdoid: 1 (0.0% accuracy)
+  hold mind: 1 (0.0% accuracy)
+  :# hold: 1 (0.0% accuracy)
+  sebah hold: 1 (0.0% accuracy)
+   hold: 2 (0.0% accuracy)
+  bold buy: 1 (0.0% accuracy)
+  honhold: 1 (0.0% accuracy)
+  holdik: 1 (0.0% accuracy)
+  glow_buy: 1 (0.0% accuracy)
+  old: 1 (0.0% accuracy)
+  boy: 1 (0.0% accuracy)
+  $holds: 1 (0.0% accuracy)
+  holdkey: 1 (0.0% accuracy)
+  the: 1 (0.0% accuracy)
+  britishhold: 1 (0.0% accuracy)
+  keep hold: 1 (0.0% accuracy)
+  holds: 1 (0.0% accuracy)
+  british_hold: 1 (0.0% accuracy)
+  buyhold: 1 (0.0% accuracy)
+   buy: 1 (0.0% accuracy)
+  put: 1 (0.0% accuracy)
+  hole: 1 (0.0% accuracy)
+  hodl: 1 (0.0% accuracy)
+
+
+STRATEGY C - DETAILED RESULTS
+----------------------------------------------------------------------
+Accuracy: 54.28% (146/269)
+Mean Return: -0.0058%
+Total Return: -1.5580%
+Std Dev: 0.4873%
+Sharpe Ratio: -0.0119
+Errors: 133
+
+Action Distribution:
+  hold: 213 (66.7% accuracy)
+  buy: 21 (14.3% accuracy)
+  nhold: 1 (0.0% accuracy)
+  hold a: 1 (0.0% accuracy)
+   hold: 3 (0.0% accuracy)
+  hole: 1 (0.0% accuracy)
+  holdr: 1 (0.0% accuracy)
+  holdw: 1 (0.0% accuracy)
+  hold:: 1 (0.0% accuracy)
+  microsoft hold: 1 (0.0% accuracy)
+  sell: 3 (33.3% accuracy)
+  holder: 1 (0.0% accuracy)
+  mold: 1 (0.0% accuracy)
+  bear_buy: 1 (0.0% accuracy)
+  hide: 1 (0.0% accuracy)
+  holdk: 1 (0.0% accuracy)
+  ...: 1 (0.0% accuracy)
+  pull: 3 (0.0% accuracy)
+  fence: 1 (0.0% accuracy)
+  holdurban: 1 (0.0% accuracy)
+  nold: 1 (0.0% accuracy)
+  nicolo: 1 (0.0% accuracy)
+  university: 1 (0.0% accuracy)
+  bear: 1 (0.0% accuracy)
+  tunnel: 1 (0.0% accuracy)
+  buyn: 1 (0.0% accuracy)
+  holds: 1 (0.0% accuracy)
+  put: 1 (0.0% accuracy)
+  electronic buy for short-term trade: 1 (0.0% accuracy)
+  grind: 1 (0.0% accuracy)
+  budget: 1 (0.0% accuracy)
+
+
+RECOMMENDATIONS
+----------------------------------------------------------------------
+Best Accuracy: Strategy A (60.07%)
+Best Mean Return: Strategy A (0.0736%)
+Best Sharpe Ratio: Strategy A (0.1065)
+
+======================================================================

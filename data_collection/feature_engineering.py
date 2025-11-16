@@ -103,7 +103,7 @@ class FeatureEngineer:
 
     def _calculate_technical_indicators(self, session, ticker_id: int, start_date: str, end_date: str) -> None:
         """
-        Calculate comprehensive technical indicators: SMA(20,50), EMA(20), RSI(14), MACD, Bollinger Bands
+        Calculate comprehensive technical indicators: SMA(20,50), EMA(20), RSI(14), MACD, Bollinger Bands, ATR(14), ADX(14)
         """
         # Get technical data sorted by date
         tech_data = session.query(MarketData)\
@@ -144,6 +144,15 @@ class FeatureEngineer:
         bb_data = self._calculate_bollinger_bands(df['close'])
         df['bollinger_upper'] = bb_data['upper']
         df['bollinger_lower'] = bb_data['lower']
+        
+        # Calculate ATR (Average True Range)
+        df['atr_14'] = self._calculate_atr(df['high'], df['low'], df['close'], period=14)
+        
+        # Calculate ADX (Average Directional Index)
+        adx_data = self._calculate_adx(df['high'], df['low'], df['close'], period=14)
+        df['adx_14'] = adx_data['adx']
+        df['di_plus_14'] = adx_data['di_plus']
+        df['di_minus_14'] = adx_data['di_minus']
 
         # Update database
         for _, row in df.iterrows():
@@ -161,6 +170,10 @@ class FeatureEngineer:
                 tech_record.macd_signal = row['macd_signal']
                 tech_record.bollinger_upper = row['bollinger_upper']
                 tech_record.bollinger_lower = row['bollinger_lower']
+                tech_record.atr_14 = row['atr_14']
+                tech_record.adx_14 = row['adx_14']
+                tech_record.di_plus_14 = row['di_plus_14']
+                tech_record.di_minus_14 = row['di_minus_14']
 
     def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
         """
@@ -200,6 +213,159 @@ class FeatureEngineer:
         return {
             'upper': upper,
             'lower': lower
+        }
+
+    def _calculate_atr(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+        """
+        Calculate Average True Range (ATR) - measures volatility.
+        
+        ATR is calculated as:
+        1. True Range (TR) = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        2. ATR = moving average of TR over the period
+        
+        Args:
+            high: Series of high prices
+            low: Series of low prices
+            close: Series of close prices
+            period: Period for ATR calculation (default 14)
+            
+        Returns:
+            Series of ATR values
+        """
+        # Calculate True Range
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        
+        # True Range is the maximum of the three
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        
+        # ATR is the moving average of True Range
+        atr = true_range.rolling(window=period, min_periods=1).mean()
+        
+        return atr
+
+    def _calculate_adx(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> Dict[str, pd.Series]:
+        """
+        Calculate Average Directional Index (ADX) and Directional Indicators.
+        
+        ADX measures trend strength (0-100, higher = stronger trend).
+        DI+ and DI- measure upward and downward trend direction.
+        
+        Calculation:
+        1. Calculate +DM and -DM (Directional Movement)
+        2. Calculate True Range (same as ATR)
+        3. Calculate +DI and -DI (Directional Indicators)
+        4. Calculate DX (Directional Index)
+        5. Calculate ADX (smoothed average of DX)
+        
+        Args:
+            high: Series of high prices
+            low: Series of low prices
+            close: Series of close prices
+            period: Period for ADX calculation (default 14)
+            
+        Returns:
+            Dictionary with 'adx', 'di_plus', and 'di_minus' Series
+        """
+        # Calculate True Range (same as ATR)
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        
+        # Calculate Directional Movement
+        up_move = high - high.shift(1)
+        down_move = low.shift(1) - low
+        
+        # +DM: up_move if up_move > down_move and up_move > 0, else 0
+        plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0)
+        
+        # -DM: down_move if down_move > up_move and down_move > 0, else 0
+        minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0)
+        
+        # Smooth +DM and -DM using Wilder's smoothing method
+        # For first period: sum of first period values
+        # Then: smoothed = previous_smoothed - (previous_smoothed / period) + current_value
+        plus_dm_smooth = plus_dm.copy()
+        minus_dm_smooth = minus_dm.copy()
+        tr_smooth = true_range.copy()
+        
+        # Initialize first period values (sum of first period)
+        if len(plus_dm) >= period:
+            plus_dm_smooth.iloc[period-1] = plus_dm.iloc[:period].sum()
+            minus_dm_smooth.iloc[period-1] = minus_dm.iloc[:period].sum()
+            tr_smooth.iloc[period-1] = true_range.iloc[:period].sum()
+        else:
+            # If not enough data, use simple sum
+            plus_dm_smooth.iloc[0] = plus_dm.iloc[0] if len(plus_dm) > 0 else 0
+            minus_dm_smooth.iloc[0] = minus_dm.iloc[0] if len(minus_dm) > 0 else 0
+            tr_smooth.iloc[0] = true_range.iloc[0] if len(true_range) > 0 else 0
+        
+        # Apply Wilder's smoothing starting from period (index period)
+        start_idx = period if len(plus_dm_smooth) > period else 1
+        for i in range(start_idx, len(plus_dm_smooth)):
+            plus_dm_smooth.iloc[i] = plus_dm_smooth.iloc[i-1] - (plus_dm_smooth.iloc[i-1] / period) + plus_dm.iloc[i]
+            minus_dm_smooth.iloc[i] = minus_dm_smooth.iloc[i-1] - (minus_dm_smooth.iloc[i-1] / period) + minus_dm.iloc[i]
+            tr_smooth.iloc[i] = tr_smooth.iloc[i-1] - (tr_smooth.iloc[i-1] / period) + true_range.iloc[i]
+        
+        # Calculate Directional Indicators (+DI and -DI)
+        # DI can only be calculated after we have smoothed values (starting at period-1)
+        di_plus = pd.Series(index=plus_dm_smooth.index, dtype=float)
+        di_minus = pd.Series(index=minus_dm_smooth.index, dtype=float)
+        
+        # Calculate DI only for indices >= period-1 (where we have smoothed values)
+        if len(tr_smooth) >= period:
+            for i in range(period - 1, len(tr_smooth)):
+                if tr_smooth.iloc[i] != 0 and not pd.isna(tr_smooth.iloc[i]):
+                    di_plus.iloc[i] = 100 * (plus_dm_smooth.iloc[i] / tr_smooth.iloc[i])
+                    di_minus.iloc[i] = 100 * (minus_dm_smooth.iloc[i] / tr_smooth.iloc[i])
+                else:
+                    di_plus.iloc[i] = 0
+                    di_minus.iloc[i] = 0
+        
+        # Fill NaN values with 0 for indices before period-1
+        di_plus = di_plus.fillna(0)
+        di_minus = di_minus.fillna(0)
+        
+        # Replace inf and NaN values with 0
+        di_plus = di_plus.replace([np.inf, -np.inf], 0)
+        di_minus = di_minus.replace([np.inf, -np.inf], 0)
+        
+        # Calculate Directional Index (DX)
+        # DX can only be calculated where we have valid DI values
+        dx = pd.Series(index=di_plus.index, dtype=float)
+        for i in range(period - 1, len(di_plus)):
+            denominator = di_plus.iloc[i] + di_minus.iloc[i]
+            if denominator != 0 and not pd.isna(denominator):
+                dx.iloc[i] = 100 * abs(di_plus.iloc[i] - di_minus.iloc[i]) / denominator
+            else:
+                dx.iloc[i] = 0
+        
+        # Fill NaN values with 0
+        dx = dx.fillna(0).replace([np.inf, -np.inf], 0)
+        
+        # Calculate ADX (smoothed average of DX)
+        adx = pd.Series(index=dx.index, dtype=float)
+        # First ADX value is average of first period DX values (starting from period-1)
+        if len(dx) >= period:
+            # First ADX is the average of DX values from period-1 to 2*period-2
+            adx_start_idx = period - 1
+            adx_end_idx = min(2 * period - 2, len(dx) - 1)
+            if adx_end_idx >= adx_start_idx:
+                adx.iloc[adx_end_idx] = dx.iloc[adx_start_idx:adx_end_idx + 1].mean()
+                
+                # Apply Wilder's smoothing for ADX starting from next index
+                for i in range(adx_end_idx + 1, len(adx)):
+                    adx.iloc[i] = (adx.iloc[i-1] * (period - 1) + dx.iloc[i]) / period
+        
+        # Fill NaN values with 0
+        adx = adx.fillna(0).replace([np.inf, -np.inf], 0)
+        
+        return {
+            'adx': adx,
+            'di_plus': di_plus,
+            'di_minus': di_minus
         }
 
     def _calculate_fundamental_changes(self, session, ticker_id: int) -> None:
