@@ -321,11 +321,20 @@ class FireworksCharliePipeline:
                 # Get data for this day
                 day_data = self.data_orchestrator.get_data_for_date(ticker, trading_day)
                 
-                if "error" in day_data:
-                    logger.error(f"Failed to get data for {ticker} on {trading_day}: {day_data['error']}")
+                # Ensure day_data is a dict
+                if not isinstance(day_data, dict):
+                    logger.error(f"get_data_for_date returned non-dict for {ticker} on {trading_day}: {type(day_data)}")
                     errors.append({
                         "date": trading_day,
-                        "error": day_data["error"]
+                        "error": f"Invalid return type: {type(day_data)}"
+                    })
+                    continue
+                
+                if "error" in day_data:
+                    logger.error(f"Failed to get data for {ticker} on {trading_day}: {day_data.get('error', 'Unknown error')}")
+                    errors.append({
+                        "date": trading_day,
+                        "error": day_data.get("error", "Unknown error")
                     })
                     continue
                 
@@ -385,13 +394,39 @@ class FireworksCharliePipeline:
                     # Combine system and user prompts
                     combined_prompt = f"{system_prompt}\n\n{user_prompt}"
                     
-                    thesis_result = self.llm_client.generate_thesis(
-                        prompt=combined_prompt,
-                        ticker=ticker,
-                        as_of_date=trading_day.isoformat()
-                    )
+                    try:
+                        thesis_result = self.llm_client.generate_thesis(
+                            prompt=combined_prompt,
+                            ticker=ticker,
+                            as_of_date=trading_day.isoformat()
+                        )
+                    except Exception as llm_exception:
+                        logger.error(f"Exception calling generate_thesis for {ticker} on {trading_day}: {llm_exception}")
+                        errors.append({
+                            "date": trading_day,
+                            "error": f"LLM exception: {str(llm_exception)}"
+                        })
+                        continue
                     
-                    if thesis_result["status"] == "success":
+                    # Ensure thesis_result is a dict
+                    if not isinstance(thesis_result, dict):
+                        logger.error(f"generate_thesis returned non-dict for {ticker} on {trading_day}: {type(thesis_result)}, value: {str(thesis_result)[:200]}")
+                        errors.append({
+                            "date": trading_day,
+                            "error": f"LLM returned invalid type: {type(thesis_result)}"
+                        })
+                        continue
+                    
+                    # Ensure status key exists
+                    if "status" not in thesis_result:
+                        logger.error(f"generate_thesis returned dict without 'status' for {ticker} on {trading_day}: {list(thesis_result.keys())}")
+                        errors.append({
+                            "date": trading_day,
+                            "error": "LLM returned dict without 'status' key"
+                        })
+                        continue
+                    
+                    if thesis_result.get("status") == "success":
                         # Save to database and checkpoint
                         session = None
                         try:
@@ -417,7 +452,16 @@ class FireworksCharliePipeline:
                             # Convert assistant_response for database (always apply conversion)
                             assistant_response = thesis_result.get("assistant_response")
                             if assistant_response:
-                                assistant_response = convert_dates(assistant_response)
+                                # Ensure assistant_response is a dict before processing
+                                if not isinstance(assistant_response, dict):
+                                    logger.warning(f"assistant_response is not a dict for {ticker} on {trading_day}: {type(assistant_response)}, creating fallback")
+                                    assistant_response = {
+                                        "reasoning": thesis_result.get("reasoning", ""),
+                                        "action": thesis_result.get("action", "hold"),
+                                        "support": thesis_result.get("support", "")
+                                    }
+                                else:
+                                    assistant_response = convert_dates(assistant_response)
                             else:
                                 # Fallback if assistant_response is missing
                                 assistant_response = {
@@ -540,7 +584,11 @@ class FireworksCharliePipeline:
                                 session.close()
                     else:
                         # LLM generation failed
-                        error_msg = thesis_result.get("error", "Unknown LLM error")
+                        error_msg = "Unknown LLM error"
+                        if isinstance(thesis_result, dict):
+                            error_msg = thesis_result.get("error", "Unknown LLM error")
+                        else:
+                            error_msg = f"LLM returned invalid response: {type(thesis_result)}"
                         logger.error(f"❌ LLM generation failed for {ticker} on {trading_day}: {error_msg}")
                         errors.append({
                             "date": trading_day,
@@ -556,12 +604,17 @@ class FireworksCharliePipeline:
                     })
                 
             except Exception as e:
-                logger.error(f"Error processing {ticker} on {trading_day}: {e}")
-                logger.debug(traceback.format_exc())
+                # Get error message safely
+                error_msg = str(e)
+                error_type = type(e).__name__
+                error_traceback = traceback.format_exc()
+                
+                logger.error(f"Error processing {ticker} on {trading_day}: {error_type}: {error_msg}")
+                logger.error(f"Full traceback:\n{error_traceback}")
                 
                 errors.append({
                     "date": trading_day,
-                    "error": str(e)
+                    "error": f"{error_type}: {error_msg}"
                 })
         
         # Get final statistics from database

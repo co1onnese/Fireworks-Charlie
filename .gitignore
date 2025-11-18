@@ -66,6 +66,10 @@ storage/checkpoints/*.pkl
 storage/distilled_theses/*.xml
 storage/raw_data/
 storage/processed_data/
+storage/rlvr_datasets/*.jsonl
+
+# Large binary files
+firectl
 
 # Jupyter Notebooks
 .ipynb_checkpoints/

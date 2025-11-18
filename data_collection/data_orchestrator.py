@@ -12,7 +12,7 @@ from .database_manager import DatabaseManager
 from .data_processor import DataProcessor
 from .eodhd_client import EODHDClient
 from .fred_client import FREDClient
-from .benzinga_client import BenzingaClient
+from .fmp_client import FMPClient
 from .feature_engineering import FeatureEngineer
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class DataOrchestrator:
         self.db_manager = DatabaseManager(config.DB_URL)
         self.eodhd_client = EODHDClient(config.EODHD_API_KEY) if config.EODHD_API_KEY else None
         self.fred_client = FREDClient(config.FRED_API_KEY) if config.FRED_API_KEY else None
-        self.benzinga_client = BenzingaClient(config.BENZINGA_API_KEY) if config.BENZINGA_API_KEY else None
+        self.fmp_client = FMPClient(config.FMP_API_KEY) if config.FMP_API_KEY else None
         
         # FRED series to fetch
         self.fred_series = [
@@ -60,7 +60,7 @@ class DataOrchestrator:
         Returns:
             tuple: (min_date, max_date, count) or (None, None, 0) if no data exists
         """
-        from .database_manager import MarketData, Fundamentals, News, MacroFeature, Ticker
+        from .database_manager import MarketData, Fundamental, News, MacroFeature, Ticker
 
         session = self.db_manager.get_session()
         try:
@@ -80,10 +80,10 @@ class DataOrchestrator:
 
             elif data_type == 'fundamental':
                 result = session.query(
-                    func.min(Fundamentals.report_date),
-                    func.max(Fundamentals.report_date),
-                    func.count(Fundamentals.fundamentals_id)
-                ).filter(Fundamentals.ticker_id == ticker_obj.ticker_id).first()
+                    func.min(Fundamental.report_date),
+                    func.max(Fundamental.report_date),
+                    func.count(Fundamental.fundamental_id)
+                ).filter(Fundamental.ticker_id == ticker_obj.ticker_id).first()
 
             elif data_type == 'news':
                 result = session.query(
@@ -96,7 +96,7 @@ class DataOrchestrator:
                 result = session.query(
                     func.min(MacroFeature.date),
                     func.max(MacroFeature.date),
-                    func.count(MacroFeature.macro_id)
+                    func.count(MacroFeature.feature_id)
                 ).filter(MacroFeature.date.isnot(None)).first()
 
             else:
@@ -126,7 +126,7 @@ class DataOrchestrator:
                 'macro': [(gap_start, gap_end)]
             }
         """
-        from .database_manager import MarketData, Fundamentals, News, MacroFeature, Ticker
+        from .database_manager import MarketData, Fundamental, News, MacroFeature, Ticker
         from sqlalchemy import and_, or_, distinct
 
         session = self.db_manager.get_session()
@@ -375,23 +375,20 @@ class DataOrchestrator:
                 session.commit()
                 logger.info(f"Stored {len(insider_processed)} insider transactions")
             
-            # 6. Fetch and process Analyst Recommendations (Benzinga API)
+            # 6. Fetch and process Analyst Recommendations (FMP historical-grades API)
             analyst_processed = []
-            if self.benzinga_client:
-                logger.info(f"Fetching analyst recommendations for {ticker} from {start_date} to {end_date}")
+            if self.fmp_client:
+                logger.info(f"Fetching analyst recommendations (historical grades) for {ticker} from FMP API")
                 
                 try:
-                    analyst_raw = self.benzinga_client.get_analyst_insights(
-                        symbols=[ticker],
-                        start_date=start_date.strftime("%Y-%m-%d"),
-                        end_date=end_date.strftime("%Y-%m-%d"),
-                        page_size=100
-                    )
+                    # FMP historical-grades API doesn't support date filtering in query params
+                    # We'll fetch all available grades and filter client-side
+                    analyst_raw = self.fmp_client.get_historical_grades(symbol=ticker)
                     
                     if not analyst_raw:
-                        logger.info(f"No analyst recommendations returned from Benzinga API for {ticker}")
+                        logger.info(f"No analyst recommendations returned from FMP API for {ticker}")
                     else:
-                        logger.info(f"Raw Benzinga API returned {len(analyst_raw)} analyst insights for {ticker}")
+                        logger.info(f"Raw FMP API returned {len(analyst_raw)} historical grades for {ticker}")
                         
                         analyst_processed = processor.process_analyst_recommendations(analyst_raw, ticker)
                         
@@ -412,7 +409,7 @@ class DataOrchestrator:
                     logger.warning(f"Error fetching analyst recommendations for {ticker}: {e}")
                     # Don't fail the entire collection if analyst recommendations fail
             else:
-                logger.debug("Benzinga client not available, skipping analyst recommendations")
+                logger.debug("FMP client not available, skipping analyst recommendations")
             
             return {
                 "status": "success",
@@ -422,7 +419,7 @@ class DataOrchestrator:
                     "technical": len(eod_processed) if self.eodhd_client else 0,
                     "news": len(news_processed) if self.eodhd_client else 0,
                     "insider": len(insider_processed) if self.eodhd_client else 0,
-                    "analyst_recommendations": len(analyst_processed) if self.benzinga_client else 0,
+                    "analyst_recommendations": len(analyst_processed) if self.fmp_client else 0,
                 }
             }
             
@@ -726,6 +723,9 @@ class DataOrchestrator:
                 "insider_transactions": [self._serialize_insider_transaction(t) for t in insider_transactions],
             }
             
+        except Exception as e:
+            logger.error(f"Error getting data for {ticker} on {as_of_date}: {e}", exc_info=True)
+            return {"error": str(e)}
         finally:
             session.close()
     
@@ -882,7 +882,9 @@ class DataOrchestrator:
             "owner_name": insider.owner_name,
             "transaction_code": insider.transaction_code,
             "shares": insider.shares,
-            "price": float(insider.price) if insider.price else None,
-            "amount": float(insider.amount) if insider.amount else None,
+            "transaction_price": float(insider.transaction_price) if insider.transaction_price else None,
+            "transaction_amount": float(insider.transaction_amount) if insider.transaction_amount else None,
+            "price": float(insider.transaction_price) if insider.transaction_price else None,  # Alias for backward compatibility
+            "amount": float(insider.transaction_amount) if insider.transaction_amount else None,  # Alias for backward compatibility
             "shares_owned_after": insider.shares_owned_after,
         }

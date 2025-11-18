@@ -345,7 +345,7 @@ class InsiderTransaction(Base):
 
 
 class AnalystRecommendation(Base):
-    """Analyst recommendations and insights from Benzinga API"""
+    """Analyst recommendations and insights from FMP API historical-grades"""
     __tablename__ = 'analyst_recommendations'
     __table_args__ = (
         UniqueConstraint('ticker_id', 'date', 'firm_id', 'analyst_insight_id', name='uq_analyst_recommendation'),
@@ -362,8 +362,8 @@ class AnalystRecommendation(Base):
     date = Column(Date, nullable=False)
     firm = Column(String(100), nullable=False)
     firm_id = Column(String(100))
-    analyst_insight_id = Column(String(100), unique=True)  # Benzinga insight ID (UUID)
-    rating_id = Column(String(100))  # Benzinga rating ID
+    analyst_insight_id = Column(String(100), unique=True)  # FMP-generated unique ID (format: FMP_{symbol}_{date}_{firm})
+    rating_id = Column(String(100))  # Rating ID (may not exist in FMP response)
     action = Column(String(50))  # "Reiterates", "Upgrades", "Downgrades", "Maintains", "Initiates"
     rating = Column(String(50))  # "Buy", "Hold", "Sell", "Strong Buy", "Strong Sell", etc.
     target_price = Column(Numeric(18, 4))  # From "pt" field

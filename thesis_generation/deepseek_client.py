@@ -156,8 +156,36 @@ Analysis Date: {as_of_date}
 
             generation_time = time.time() - start_time
 
-            # Extract response content
+            # Extract response content - with defensive checks
+            if not response or not response.choices or len(response.choices) == 0:
+                logger.error(f"No response choices for {ticker} on {as_of_date}")
+                return {
+                    "status": "error",
+                    "error": "No response from API",
+                    "ticker": ticker,
+                    "as_of_date": as_of_date
+                }
+            
             assistant_content = response.choices[0].message.content
+            if not assistant_content:
+                logger.error(f"Empty response content for {ticker} on {as_of_date}")
+                return {
+                    "status": "error",
+                    "error": "Empty response content",
+                    "ticker": ticker,
+                    "as_of_date": as_of_date
+                }
+            
+            # Ensure assistant_content is a string
+            if not isinstance(assistant_content, str):
+                logger.error(f"Response content is not a string for {ticker} on {as_of_date}: {type(assistant_content)}")
+                return {
+                    "status": "error",
+                    "error": f"Response content is not a string: {type(assistant_content)}",
+                    "ticker": ticker,
+                    "as_of_date": as_of_date
+                }
+            
             tokens_used = response.usage.total_tokens if response.usage else 0
 
             logger.info(
@@ -171,13 +199,24 @@ Analysis Date: {as_of_date}
             else:
                 parsed_response = self._parse_xml_response(assistant_content)
 
+            # CRITICAL: Ensure parsed_response is a dict BEFORE accessing it
             if not parsed_response:
                 return {
                     "status": "error",
                     "error": "Failed to parse response",
                     "raw_response": assistant_content
                 }
+            
+            # Ensure parsed_response is a dict (defensive check - MUST be before .get() calls)
+            if not isinstance(parsed_response, dict):
+                logger.error(f"Parsed response is not a dict: {type(parsed_response)}, value: {str(parsed_response)[:200]}")
+                return {
+                    "status": "error",
+                    "error": f"Parsed response is not a dict: {type(parsed_response)}",
+                    "raw_response": assistant_content
+                }
 
+            # Now safe to call .get() on parsed_response
             return {
                 "status": "success",
                 "system_prompt": system_prompt,
@@ -197,9 +236,10 @@ Analysis Date: {as_of_date}
             }
 
         except Exception as e:
-            logger.error(f"Error generating thesis for {ticker}: {e}")
             import traceback
-            logger.debug(traceback.format_exc())
+            error_traceback = traceback.format_exc()
+            logger.error(f"Error generating thesis for {ticker}: {e}")
+            logger.error(f"Full traceback:\n{error_traceback}")
 
             return {
                 "status": "error",
@@ -288,7 +328,13 @@ Analysis Date: {as_of_date}
         """
         try:
             # Try direct JSON parsing
-            return json.loads(response)
+            parsed = json.loads(response)
+            # Ensure we return a dict, not a string or other type
+            if isinstance(parsed, dict):
+                return parsed
+            else:
+                logger.error(f"JSON parsed to non-dict type: {type(parsed)}, value: {str(parsed)[:200]}")
+                return None
         except json.JSONDecodeError:
             # Try to extract JSON from markdown code blocks
             if "```json" in response:
@@ -296,8 +342,14 @@ Analysis Date: {as_of_date}
                     json_start = response.find("```json") + 7
                     json_end = response.find("```", json_start)
                     json_str = response[json_start:json_end].strip()
-                    return json.loads(json_str)
-                except:
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, dict):
+                        return parsed
+                    else:
+                        logger.error(f"JSON from code block parsed to non-dict: {type(parsed)}")
+                        return None
+                except Exception as e:
+                    logger.debug(f"Failed to parse JSON from code block: {e}")
                     pass
 
             # Try to extract JSON object
@@ -306,8 +358,14 @@ Analysis Date: {as_of_date}
                     json_start = response.find("{")
                     json_end = response.rfind("}") + 1
                     json_str = response[json_start:json_end]
-                    return json.loads(json_str)
-                except:
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, dict):
+                        return parsed
+                    else:
+                        logger.error(f"JSON from braces parsed to non-dict: {type(parsed)}")
+                        return None
+                except Exception as e:
+                    logger.debug(f"Failed to parse JSON from braces: {e}")
                     pass
 
             logger.error(f"Failed to parse JSON response: {response[:200]}")

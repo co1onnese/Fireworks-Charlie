@@ -165,8 +165,17 @@ class ContextCompressor:
         # Aggregate insider transactions
         all_insider = []
         for day in week_data:
-            if day.get('insider_transactions'):
-                all_insider.extend(day['insider_transactions'])
+            # Ensure day is a dict
+            if not isinstance(day, dict):
+                logger.error(f"day is not a dict in _create_weekly_summary: {type(day)}")
+                continue
+            insider_data = day.get('insider_transactions')
+            if insider_data:
+                # Ensure insider_data is a list
+                if isinstance(insider_data, list):
+                    all_insider.extend(insider_data)
+                else:
+                    logger.warning(f"insider_transactions is not a list: {type(insider_data)}")
 
         if all_insider:
             summary['insider_transactions'] = self._summarize_insider_weekly(all_insider)
@@ -183,8 +192,17 @@ class ContextCompressor:
         """Aggregate technical indicators for a week"""
         all_technical = []
         for day in week_data:
-            if day.get('technical'):
-                all_technical.extend(day['technical'])
+            # Ensure day is a dict
+            if not isinstance(day, dict):
+                logger.error(f"day is not a dict in _aggregate_technical_weekly: {type(day)}")
+                continue
+            technical_data = day.get('technical')
+            if technical_data:
+                # Ensure technical_data is a list
+                if isinstance(technical_data, list):
+                    all_technical.extend(technical_data)
+                else:
+                    logger.warning(f"technical is not a list: {type(technical_data)}")
 
         if not all_technical:
             return None
@@ -222,26 +240,60 @@ class ContextCompressor:
         """Aggregate news for a week"""
         all_news = []
         for day in week_data:
-            if day.get('news'):
-                all_news.extend(day['news'])
+            # Ensure day is a dict
+            if not isinstance(day, dict):
+                logger.error(f"day is not a dict in _aggregate_news_weekly: {type(day)}")
+                continue
+                
+            news_data = day.get('news')
+            if not news_data:
+                continue
+            
+            # Handle different news data structures:
+            # 1. Dict with recent_articles/older_articles (from data_orchestrator)
+            if isinstance(news_data, dict):
+                recent = news_data.get('recent_articles', [])
+                older = news_data.get('older_articles', [])
+                # Ensure both are lists
+                if isinstance(recent, list):
+                    all_news.extend(recent)
+                if isinstance(older, list):
+                    all_news.extend(older)
+            # 2. List of news items (legacy format)
+            elif isinstance(news_data, list):
+                all_news.extend(news_data)
+            else:
+                logger.warning(f"Unexpected news_data type in _aggregate_news_weekly: {type(news_data)}")
+                continue
 
         if not all_news:
             return None
 
-        # Count by sentiment
-        positive = sum(1 for n in all_news if n.get('sentiment_score', 0) > 0.1)
-        negative = sum(1 for n in all_news if n.get('sentiment_score', 0) < -0.1)
-        neutral = len(all_news) - positive - negative
+        # Filter out non-dict items and ensure all items are dicts before calling .get()
+        valid_news = []
+        for n in all_news:
+            if isinstance(n, dict):
+                valid_news.append(n)
+            else:
+                logger.warning(f"Skipping non-dict news item in _aggregate_news_weekly: {type(n)}")
+        
+        if not valid_news:
+            return None
+
+        # Count by sentiment (now safe - all items are dicts)
+        positive = sum(1 for n in valid_news if n.get('sentiment_score', 0) > 0.1)
+        negative = sum(1 for n in valid_news if n.get('sentiment_score', 0) < -0.1)
+        neutral = len(valid_news) - positive - negative
 
         # Calculate average sentiment
-        sentiments = [n.get('sentiment_score', 0) for n in all_news]
+        sentiments = [n.get('sentiment_score', 0) for n in valid_news]
         avg_sentiment = mean(sentiments) if sentiments else 0
 
         # Find most significant headline (highest absolute sentiment)
-        top_headline = max(all_news, key=lambda n: abs(n.get('sentiment_score', 0))) if all_news else None
+        top_headline = max(valid_news, key=lambda n: abs(n.get('sentiment_score', 0))) if valid_news else None
 
         summary = {
-            'total_articles': len(all_news),
+            'total_articles': len(valid_news),
             'positive_count': positive,
             'negative_count': negative,
             'neutral_count': neutral,
@@ -257,9 +309,17 @@ class ContextCompressor:
 
     def _summarize_insider_weekly(self, transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Summarize insider transactions for a week"""
+        # Filter out non-dict items and ensure all items are dicts before calling .get()
+        valid_transactions = []
+        for t in transactions:
+            if isinstance(t, dict):
+                valid_transactions.append(t)
+            else:
+                logger.warning(f"Skipping non-dict transaction in _summarize_insider_weekly: {type(t)}")
+        
         # Keep only significant transactions
-        buys = [t for t in transactions if t.get('transaction_code') == 'P']
-        sells = [t for t in transactions if t.get('transaction_code') == 'S']
+        buys = [t for t in valid_transactions if t.get('transaction_code') == 'P']
+        sells = [t for t in valid_transactions if t.get('transaction_code') == 'S']
 
         summary_items = []
 

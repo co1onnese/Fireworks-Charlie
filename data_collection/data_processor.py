@@ -395,90 +395,117 @@ class DataProcessor:
 
     def process_analyst_recommendations(self, raw_data: list, symbol: str) -> list:
         """
-        Processes raw analyst recommendations data from Benzinga API.
+        Processes raw analyst recommendations data from FMP API (historical-grades).
         
-        Expected raw_data format from Benzinga API:
+        Expected raw_data format from FMP API (aggregated counts):
         [{
-            'id': 'uuid',
-            'action': 'Reiterates',
-            'rating': 'Buy',
-            'pt': '155.00',
-            'analyst_insights': '...',
-            'firm': 'Goldman Sachs',
-            'firm_id': '...',
-            'rating_id': '...',
-            'date': '2024-02-15',
-            'updated': 1708018876,
-            'security': {'symbol': 'AAPL', ...}
+            'symbol': 'AAPL',
+            'date': '2025-11-01',
+            'analystRatingsStrongBuy': 5,
+            'analystRatingsBuy': 24,
+            'analystRatingsHold': 15,
+            'analystRatingsSell': 1,
+            'analystRatingsStrongSell': 3
         }]
         
+        Note: FMP API returns aggregated rating counts per date, not individual firm recommendations.
+        This method creates consensus records representing the overall analyst sentiment for each date.
+        The database schema expects individual recommendations, so we create one record per date
+        with "Consensus" as the firm name and the dominant rating.
+        
         Args:
-            raw_data: List of analyst insight dictionaries from Benzinga API
+            raw_data: List of aggregated grade dictionaries from FMP API
             symbol: Ticker symbol (e.g., "AAPL")
             
         Returns:
-            List of processed analyst recommendation dictionaries
+            List of processed analyst recommendation dictionaries compatible with database schema
         """
         if not raw_data:
             logger.debug(f"No raw analyst recommendations data to process for {symbol}")
             return []
 
         initial_count = len(raw_data)
-        logger.debug(f"Processing {initial_count} raw analyst recommendations for {symbol}")
+        logger.debug(f"Processing {initial_count} raw analyst recommendation snapshots for {symbol}")
 
         processed_data = []
         symbol_clean = symbol.split(".")[0].upper()
 
-        for insight in raw_data:
+        for snapshot in raw_data:
             try:
-                # Validate that this insight is for the requested symbol
-                security = insight.get("security", {})
-                insight_symbol = security.get("symbol", "").upper()
+                # Validate that this snapshot is for the requested symbol
+                snapshot_symbol = snapshot.get("symbol", "").upper()
                 
-                if insight_symbol != symbol_clean:
-                    logger.debug(f"Skipping insight for {insight_symbol} (requested {symbol_clean})")
+                if snapshot_symbol != symbol_clean:
+                    logger.debug(f"Skipping snapshot for {snapshot_symbol} (requested {symbol_clean})")
                     continue
 
                 # Parse date
-                date_str = insight.get("date", "")
+                date_str = snapshot.get("date", "")
                 if not date_str:
-                    logger.warning(f"Skipping insight with missing date: {insight.get('id')}")
+                    logger.warning(f"Skipping snapshot with missing date")
                     continue
                 
                 try:
-                    insight_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    snapshot_date = datetime.strptime(date_str, "%Y-%m-%d").date()
                 except ValueError:
-                    logger.warning(f"Invalid date format '{date_str}' for insight {insight.get('id')}")
+                    logger.warning(f"Invalid date format '{date_str}' for snapshot")
                     continue
 
                 # Filter by date range
-                if insight_date < self.start_date.date() or insight_date > self.end_date.date():
+                if snapshot_date < self.start_date.date() or snapshot_date > self.end_date.date():
                     continue
 
-                # Parse target price (pt field is string, convert to float)
-                target_price = None
-                pt_str = insight.get("pt", "")
-                if pt_str:
-                    try:
-                        target_price = float(pt_str)
-                    except (ValueError, TypeError):
-                        logger.debug(f"Could not parse target price '{pt_str}' for insight {insight.get('id')}")
+                # Extract aggregated counts
+                strong_buy = snapshot.get("analystRatingsStrongBuy", 0) or 0
+                buy = snapshot.get("analystRatingsBuy", 0) or 0
+                hold = snapshot.get("analystRatingsHold", 0) or 0
+                sell = snapshot.get("analystRatingsSell", 0) or 0
+                strong_sell = snapshot.get("analystRatingsStrongSell", 0) or 0
+                
+                total_ratings = strong_buy + buy + hold + sell + strong_sell
+                
+                if total_ratings == 0:
+                    logger.debug(f"Skipping snapshot with zero ratings for {symbol} on {snapshot_date}")
+                    continue
 
-                # Extract action field
-                action = insight.get("action", "").strip()
+                # Determine dominant rating (consensus)
+                rating_counts = {
+                    "Strong Buy": strong_buy,
+                    "Buy": buy,
+                    "Hold": hold,
+                    "Sell": sell,
+                    "Strong Sell": strong_sell
+                }
+                dominant_rating = max(rating_counts, key=rating_counts.get)
+                
+                # Create consensus record
+                firm = "Consensus"
+                action = "Maintains"  # Aggregated data doesn't show individual actions
+                
+                # Create unique ID
+                analyst_insight_id = f"FMP_{symbol_clean}_{snapshot_date}_Consensus"
+
+                # Create insight text with breakdown
+                insight_text = (
+                    f"Analyst consensus on {snapshot_date}: "
+                    f"{strong_buy} Strong Buy, {buy} Buy, {hold} Hold, "
+                    f"{sell} Sell, {strong_sell} Strong Sell. "
+                    f"Total: {total_ratings} analysts. "
+                    f"Dominant rating: {dominant_rating}"
+                )
 
                 record = {
                     "symbol": symbol_clean,
-                    "date": insight_date,
-                    "firm": insight.get("firm", ""),
-                    "firm_id": insight.get("firm_id"),
-                    "analyst_insight_id": insight.get("id"),  # UUID from Benzinga
-                    "rating_id": insight.get("rating_id"),
+                    "date": snapshot_date,
+                    "firm": firm,
+                    "firm_id": None,  # Not available in aggregated data
+                    "analyst_insight_id": analyst_insight_id,
+                    "rating_id": None,  # Not available in aggregated data
                     "action": action,
-                    "rating": insight.get("rating", ""),  # "Buy", "Hold", "Sell", etc.
-                    "target_price": target_price,
-                    "analyst_insights": insight.get("analyst_insights", ""),  # Full text
-                    "updated_timestamp": insight.get("updated"),  # Unix timestamp
+                    "rating": dominant_rating,
+                    "target_price": None,  # Not available in aggregated data
+                    "analyst_insights": insight_text,
+                    "updated_timestamp": None,
                 }
 
                 processed_data.append(record)
@@ -487,7 +514,7 @@ class DataProcessor:
                 logger.warning(f"Error processing analyst recommendation for {symbol}: {e}")
                 continue
 
-        logger.info(f"Processed {len(processed_data)} analyst recommendation records for {symbol} (from {initial_count} raw insights)")
+        logger.info(f"Processed {len(processed_data)} analyst recommendation records for {symbol} (from {initial_count} raw snapshots)")
         return processed_data
 
     def process_macro_indicators(

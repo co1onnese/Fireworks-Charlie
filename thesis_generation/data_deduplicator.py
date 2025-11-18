@@ -40,6 +40,11 @@ class DataDeduplicator:
         deduplicated_data = []
         
         for day_data in all_data:
+            # CRITICAL: Ensure day_data is a dict before accessing it
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in deduplicate_cumulative_data: {type(day_data)}")
+                continue
+            
             deduped_day = {
                 "date": day_data["date"],
                 "technical": day_data.get("technical", []),  # Always include all technical data
@@ -52,6 +57,10 @@ class DataDeduplicator:
             # Deduplicate fundamentals - only include if newer than last seen
             if day_data.get("fundamentals"):
                 fund_data = day_data["fundamentals"]
+                # Ensure fund_data is a dict before calling .get()
+                if not isinstance(fund_data, dict):
+                    logger.error(f"fund_data is not a dict in deduplicate_cumulative_data: {type(fund_data)}")
+                    continue
                 report_date = fund_data.get("report_date")
                 
                 if ticker not in self.seen_fundamentals or report_date > self.seen_fundamentals[ticker]:
@@ -69,14 +78,22 @@ class DataDeduplicator:
                     deduped_older = []
 
                     # Deduplicate recent articles
-                    for article in news_data.get("recent_articles", []):
+                    recent_articles = news_data.get("recent_articles", [])
+                    if not isinstance(recent_articles, list):
+                        logger.error(f"recent_articles is not a list: {type(recent_articles)}")
+                        recent_articles = []
+                    for article in recent_articles:
                         news_hash = self._compute_news_hash(article)
                         if news_hash not in self.seen_news_hashes:
                             deduped_recent.append(article)
                             self.seen_news_hashes.add(news_hash)
 
                     # Deduplicate older articles
-                    for article in news_data.get("older_articles", []):
+                    older_articles = news_data.get("older_articles", [])
+                    if not isinstance(older_articles, list):
+                        logger.error(f"older_articles is not a list: {type(older_articles)}")
+                        older_articles = []
+                    for article in older_articles:
                         news_hash = self._compute_news_hash(article)
                         if news_hash not in self.seen_news_hashes:
                             deduped_older.append(article)
@@ -111,6 +128,10 @@ class DataDeduplicator:
             # Deduplicate macro features - only include if values changed
             if day_data.get("macro_features"):
                 macro_data = day_data["macro_features"]
+                # Ensure macro_data is a dict before calling .get()
+                if not isinstance(macro_data, dict):
+                    logger.error(f"macro_data is not a dict in deduplicate_cumulative_data: {type(macro_data)}")
+                    continue
                 macro_date = macro_data.get("date")
                 
                 # Check each macro indicator for changes

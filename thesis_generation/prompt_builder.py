@@ -45,6 +45,14 @@ class CumulativePromptBuilder:
         prompt_parts = []
         
         # Header
+        # Ensure data_up_to_date is not empty and items are dicts
+        if not data_up_to_date:
+            raise ValueError("No data provided for prompt building")
+        if not isinstance(data_up_to_date[-1], dict):
+            raise ValueError(f"Last item in data_up_to_date is not a dict: {type(data_up_to_date[-1])}")
+        if not isinstance(data_up_to_date[0], dict):
+            raise ValueError(f"First item in data_up_to_date is not a dict: {type(data_up_to_date[0])}")
+        
         prompt_parts.append(f"=== COMPREHENSIVE INVESTMENT ANALYSIS FOR {ticker} ===")
         prompt_parts.append(f"Analysis Date: {data_up_to_date[-1]['date']}")
         prompt_parts.append(f"Historical Data Range: {data_up_to_date[0]['date']} to {data_up_to_date[-1]['date']}")
@@ -83,6 +91,10 @@ class CumulativePromptBuilder:
         current_week = []
         
         for day_data in data:
+            # Ensure day_data is a dict before calling .get()
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in _build_technical_section: {type(day_data)}")
+                continue
             if not day_data.get("technical"):
                 continue
                 
@@ -143,6 +155,10 @@ class CumulativePromptBuilder:
         # Find all fundamentals updates
         fundamentals_updates = []
         for day_data in data:
+            # Ensure day_data is a dict before calling .get()
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in _build_fundamentals_section: {type(day_data)}")
+                continue
             if day_data.get("fundamentals"):
                 fundamentals_updates.append((day_data["date"], day_data["fundamentals"]))
         
@@ -190,6 +206,10 @@ class CumulativePromptBuilder:
         # Extract news data from the most recent day's data (which has all 30 days of news)
         news_data = None
         for day_data in reversed(data):  # Start from most recent
+            # Ensure day_data is a dict before calling .get()
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in _build_news_section: {type(day_data)}")
+                continue
             if day_data.get("news") and isinstance(day_data["news"], dict):
                 news_data = day_data["news"]
                 break
@@ -384,6 +404,10 @@ class CumulativePromptBuilder:
         # Collect all macro updates
         macro_updates = []
         for day_data in data:
+            # Ensure day_data is a dict before calling .get()
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in _build_macro_section: {type(day_data)}")
+                continue
             if day_data.get("macro_features"):
                 macro_updates.append((day_data["date"], day_data["macro_features"]))
         
@@ -421,6 +445,10 @@ class CumulativePromptBuilder:
         # Collect all insider transactions
         all_transactions = []
         for day_data in data:
+            # Ensure day_data is a dict before calling .get()
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in _build_insider_section: {type(day_data)}")
+                continue
             if day_data.get("insider_transactions"):
                 all_transactions.extend(day_data["insider_transactions"])
         
@@ -510,11 +538,20 @@ List 3-5 specific data points from the analysis that most strongly support your 
         user_prompt_parts = []
         
         # Header - clearly show prediction date vs data window
+        # Ensure data_up_to_date is not empty and last item is a dict
+        if not data_up_to_date:
+            raise ValueError("No data provided for prompt building")
+        if not isinstance(data_up_to_date[-1], dict):
+            raise ValueError(f"Last item in data_up_to_date is not a dict: {type(data_up_to_date[-1])}")
         prompt_date = data_up_to_date[-1]['date']
 
         # Calculate technical data window from the actual technical data
         technical_dates = []
         for day_data in data_up_to_date:
+            # Ensure day_data is a dict before calling .get()
+            if not isinstance(day_data, dict):
+                logger.error(f"day_data is not a dict in build_cumulative_prompt_messages: {type(day_data)}")
+                continue
             if day_data.get('technical'):
                 for tech_record in day_data['technical']:
                     technical_dates.append(tech_record['date'])

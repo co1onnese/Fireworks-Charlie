@@ -74,6 +74,14 @@ class BenzingaClient:
         for attempt in range(max_retries):
             try:
                 response = requests.get(url, params=all_params, timeout=30)
+                
+                # Log request details for debugging (without exposing full API key)
+                if attempt == 0:  # Only log on first attempt
+                    logger.debug(
+                        f"Benzinga API request: {endpoint} with params: "
+                        f"{', '.join([k for k in all_params.keys() if k != 'token'])}"
+                    )
+                
                 response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
                 return response.json()
             except requests.exceptions.HTTPError as e:
@@ -89,9 +97,28 @@ class BenzingaClient:
                 elif response.status_code == 401:  # Unauthorized
                     logger.error("Authentication failed. Check API key.")
                     raise
+                elif response.status_code == 500:  # Internal Server Error
+                    # 500 errors from Benzinga API typically indicate:
+                    # 1. API key doesn't have access to this endpoint (subscription level)
+                    # 2. Server-side issues
+                    # 3. Invalid parameter combinations
+                    error_msg = response.text[:200] if response.text else "Empty response body"
+                    logger.warning(
+                        f"Benzinga API returned 500 Internal Server Error for {endpoint}. "
+                        f"Response: {error_msg}. "
+                        f"This may indicate: (1) API key lacks access to this endpoint, "
+                        f"(2) Server-side issues, or (3) Invalid parameters. "
+                        f"Returning empty list to allow backfill to continue. "
+                        f"Analyst recommendations are optional for training data."
+                    )
+                    return []  # Return empty list instead of crashing - analyst recommendations are optional
                 else:
                     if attempt == max_retries - 1:
-                        raise  # Re-raise on last attempt
+                        logger.warning(
+                            f"Failed after {max_retries} attempts with status {response.status_code}. "
+                            f"Returning empty list to allow backfill to continue."
+                        )
+                        return []  # Return empty list on final failure instead of crashing
                     time.sleep(2**attempt)  # Exponential backoff
             except requests.exceptions.ConnectionError as e:
                 logger.error(

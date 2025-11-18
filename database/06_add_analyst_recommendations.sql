@@ -1,5 +1,5 @@
 -- ============================================================================
--- Create analyst_recommendations table for Benzinga API analyst insights
+-- Create analyst_recommendations table for FMP API historical-grades
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS analyst_recommendations (
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS analyst_recommendations (
     date DATE NOT NULL,
     firm VARCHAR(100) NOT NULL,
     firm_id VARCHAR(100),
-    analyst_insight_id VARCHAR(100) UNIQUE,  -- Benzinga insight ID (UUID)
+    analyst_insight_id VARCHAR(100) UNIQUE,  -- FMP-generated unique ID (format: FMP_{symbol}_{date}_{firm})
     rating_id VARCHAR(100),  -- Benzinga rating ID
     action VARCHAR(50),  -- "Reiterates", "Upgrades", "Downgrades", "Maintains", "Initiates"
     rating VARCHAR(50),  -- "Buy", "Hold", "Sell", "Strong Buy", "Strong Sell", etc.
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS analyst_recommendations (
 );
 
 -- Add comments for documentation
-COMMENT ON TABLE analyst_recommendations IS 'Analyst recommendations and insights from Benzinga API';
-COMMENT ON COLUMN analyst_recommendations.analyst_insight_id IS 'Unique Benzinga insight ID (UUID) - prevents duplicates';
+COMMENT ON TABLE analyst_recommendations IS 'Analyst recommendations and insights from FMP API historical-grades';
+COMMENT ON COLUMN analyst_recommendations.analyst_insight_id IS 'Unique FMP-generated ID (format: FMP_{symbol}_{date}_{firm}) - prevents duplicates';
 COMMENT ON COLUMN analyst_recommendations.action IS 'Analyst action: Reiterates, Upgrades, Downgrades, Maintains, Initiates';
 COMMENT ON COLUMN analyst_recommendations.rating IS 'Analyst rating: Buy, Hold, Sell, Strong Buy, Strong Sell, etc.';
 COMMENT ON COLUMN analyst_recommendations.target_price IS 'Price target from analyst (from pt field)';

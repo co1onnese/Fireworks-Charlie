@@ -1,0 +1,19 @@
+{
+  "generated_at": "2025-11-16T07:18:04.222714",
+  "tickers": [
+    "AAPL"
+  ],
+  "date_range": {
+    "start": "2024-01-15",
+    "end": "2024-01-19"
+  },
+  "stats": {
+    "success": 0,
+    "failed": 2,
+    "skipped": 0,
+    "total_tokens": 0,
+    "total_time_ms": 0
+  },
+  "model": "deepseek-reasoner",
+  "temperature": 0.7
+}
