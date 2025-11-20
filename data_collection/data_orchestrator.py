@@ -704,6 +704,17 @@ class DataOrchestrator:
                 InsiderTransaction.transaction_date.desc()
             ).limit(20).all()
             
+            # Get analyst recommendations (last 90 days) - strict point-in-time
+            from .database_manager import AnalystRecommendation
+            analyst_start_date = as_of_date - timedelta(days=90)
+            analyst_recommendations = session.query(AnalystRecommendation).filter(
+                AnalystRecommendation.ticker_id == ticker_obj.ticker_id,
+                AnalystRecommendation.date < as_of_date,  # Strict < to prevent lookahead bias
+                AnalystRecommendation.date >= analyst_start_date
+            ).order_by(
+                AnalystRecommendation.date.desc()
+            ).limit(50).all()
+            
             # Serialize news with metadata about recent vs older
             news_data = {
                 "recent_articles": [self._serialize_news(n, include_full_content=True) for n in recent_news],
@@ -718,9 +729,9 @@ class DataOrchestrator:
                 "fundamentals": self._serialize_fundamentals(fundamentals) if fundamentals else None,
                 "news": news_data,  # New structured format
                 "news_sentiment_features": self._serialize_sentiment_features(sentiment_features),
-                "news_summary": self._build_news_summary(news, sentiment_features),
                 "macro_features": self._serialize_macro_features(macro_features) if macro_features else None,
                 "insider_transactions": [self._serialize_insider_transaction(t) for t in insider_transactions],
+                "analyst_recommendations": [self._serialize_analyst_recommendation(ar) for ar in analyst_recommendations],
             }
             
         except Exception as e:
@@ -873,6 +884,19 @@ class DataOrchestrator:
             "cpi_monthly_pct": float(macro.cpi_monthly_pct) if macro.cpi_monthly_pct else None,
             "gdp_qoq_pct": float(macro.gdp_qoq_pct) if macro.gdp_qoq_pct else None,
             "unemployment_rate_change": float(macro.unemployment_rate_change) if macro.unemployment_rate_change else None,
+        }
+    
+    def _serialize_analyst_recommendation(self, rec) -> Dict[str, Any]:
+        """Serialize analyst recommendation record"""
+        return {
+            "date": rec.date,
+            "firm": rec.firm,
+            "firm_id": rec.firm_id,
+            "action": rec.action,
+            "rating": rec.rating,
+            "target_price": float(rec.target_price) if rec.target_price else None,
+            "analyst_insights": rec.analyst_insights,
+            "updated_timestamp": rec.updated_timestamp,
         }
     
     def _serialize_insider_transaction(self, insider) -> Dict[str, Any]:

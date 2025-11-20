@@ -50,8 +50,11 @@ class DataDeduplicator:
                 "technical": day_data.get("technical", []),  # Always include all technical data
                 "fundamentals": None,
                 "news": [],
+                "news_summary": day_data.get("news_summary"),  # Preserve news summary for sentiment overview
+                "news_sentiment_features": day_data.get("news_sentiment_features", []),  # Preserve sentiment features
                 "macro_features": None,
                 "insider_transactions": day_data.get("insider_transactions", []),  # Include if present
+                "analyst_recommendations": day_data.get("analyst_recommendations", []),  # Include if present
             }
             
             # Deduplicate fundamentals - only include if newer than last seen

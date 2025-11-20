@@ -836,6 +836,18 @@ class DatabaseManager:
                 ).first()
 
             if not existing:
+                # Calculate sentiment_label from sentiment_score if not provided
+                sentiment_score = news_item.get('sentiment_score')
+                sentiment_label = news_item.get('sentiment_label')
+                if sentiment_label is None and sentiment_score is not None:
+                    score = float(sentiment_score)
+                    if score > 0.1:
+                        sentiment_label = "positive"
+                    elif score < -0.1:
+                        sentiment_label = "negative"
+                    else:
+                        sentiment_label = "neutral"
+                
                 news_record = News(
                     ticker_id=ticker_id,
                     headline=news_item['headline'],
@@ -844,7 +856,9 @@ class DatabaseManager:
                     url=url,
                     published_at=news_item['published_at'],
                     source=news_item.get('source'),
-                    sentiment_score=news_item.get('sentiment_score')
+                    sentiment_score=sentiment_score,
+                    sentiment_label=sentiment_label,
+                    sentiment_confidence=news_item.get('sentiment_confidence')  # EODHD doesn't provide this, will be None
                 )
                 session.add(news_record)
                 logger.debug(f"Inserted news for ticker {ticker_id}: {news_item['headline'][:50]}...")

@@ -11,6 +11,11 @@ from datetime import datetime, date
 
 import requests
 
+
+class FMPAPILimitExceeded(Exception):
+    """Exception raised when FMP API rate limit is exceeded."""
+    pass
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -105,7 +110,17 @@ class FMPClient:
                     f"HTTP error on attempt {attempt + 1}/{max_retries} for {endpoint}: {e}"
                 )
                 if response.status_code == 429:  # Too Many Requests
-                    logger.warning("Rate limit hit. Retrying with exponential backoff.")
+                    if attempt == max_retries - 1:
+                        # After all retries exhausted, raise exception to stop backfill
+                        logger.error(
+                            f"FMP API rate limit exceeded (429) after {max_retries} attempts. "
+                            f"Stopping backfill. Please wait before retrying."
+                        )
+                        raise FMPAPILimitExceeded(
+                            f"FMP API rate limit exceeded for endpoint {endpoint}. "
+                            f"Status: 429. Please wait before retrying."
+                        )
+                    logger.warning(f"Rate limit hit (429). Retrying with exponential backoff (attempt {attempt + 1}/{max_retries}).")
                     time.sleep(2**attempt)  # Exponential backoff
                 elif response.status_code == 404:  # Not Found
                     logger.warning(f"Endpoint {endpoint} not found (404).")

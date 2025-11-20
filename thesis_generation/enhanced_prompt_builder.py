@@ -226,6 +226,11 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         sections.extend(self._build_detailed_insider_analysis(ticker, daily_data))
         sections.append("")
 
+        # Analyst Recommendations (Recent)
+        sections.append("**ANALYST RECOMMENDATIONS (Recent)**")
+        sections.extend(self._build_detailed_analyst_recommendations(ticker, daily_data))
+        sections.append("")
+
         return sections
     
     def _build_summarized_medium_section(self, ticker: str, medium_data: List[Dict[str, Any]]) -> List[str]:
@@ -346,18 +351,22 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         return sections
     
     def _build_detailed_news_analysis(self, ticker: str, data: List[Dict[str, Any]]) -> List[str]:
-        """Build detailed news analysis section with sentiment overview and trends"""
+        """Build detailed news analysis section with individual article sentiment scores"""
         sections = []
 
-        # Get latest news summary from most recent day
-        latest_day = data[0] if data else {}
-        news_summary = latest_day.get('news_summary', {})
-
-        # Check if we have news data
+        # Collect all news articles from all days
         all_news = []
         for day_data in data:
             if day_data.get('news'):
-                all_news.extend(day_data['news'])
+                news_data = day_data['news']
+                # News can be a dict with 'recent_articles' and 'older_articles' or a list
+                if isinstance(news_data, dict):
+                    if 'recent_articles' in news_data:
+                        all_news.extend(news_data['recent_articles'])
+                    if 'older_articles' in news_data:
+                        all_news.extend(news_data['older_articles'])
+                elif isinstance(news_data, list):
+                    all_news.extend(news_data)
 
         if not all_news:
             sections.append(
@@ -366,65 +375,103 @@ Focus on generating the most comprehensive and actionable investment thesis poss
             )
             return sections
 
-        # Display sentiment summary first
-        sections.append(f"**NEWS SENTIMENT OVERVIEW (Last 30 Days)**")
-        sections.append(f"  Total Articles: {news_summary.get('total_articles', 0)}")
-        avg_sentiment = news_summary.get('avg_sentiment', 0)
-        sentiment_desc = 'Positive' if avg_sentiment > 0.1 else 'Negative' if avg_sentiment < -0.1 else 'Neutral'
-        sections.append(f"  Average Sentiment: {avg_sentiment:.3f} ({sentiment_desc})")
-        sections.append(f"  Sentiment Confidence: {news_summary.get('avg_confidence', 0):.3f}")
-        sections.append(f"  Trend: {news_summary.get('trend_direction', 'neutral').title()}")
+        # Filter articles to ensure they have sentiment scores
+        articles_with_sentiment = []
+        for news in all_news:
+            if not isinstance(news, dict):
+                continue
+            
+            # Ensure sentiment_score exists (required from EODHD API)
+            sentiment_score = news.get('sentiment_score')
+            if sentiment_score is None:
+                continue  # Skip articles without sentiment scores
+            
+            # Calculate sentiment_label if missing
+            label = news.get('sentiment_label')
+            if not label:
+                try:
+                    score = float(sentiment_score)
+                    if score > 0.1:
+                        label = "positive"
+                    elif score < -0.1:
+                        label = "negative"
+                    else:
+                        label = "neutral"
+                except (ValueError, TypeError):
+                    continue  # Skip if can't parse sentiment_score
+            
+            # Parse published_at for sorting
+            published_at = news.get('published_at')
+            if isinstance(published_at, str):
+                try:
+                    # Try parsing ISO format
+                    published_at = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                except:
+                    try:
+                        # Try parsing common datetime formats
+                        from dateutil import parser
+                        published_at = parser.parse(published_at)
+                    except:
+                        published_at = None
+            elif isinstance(published_at, datetime):
+                pass  # Already a datetime
+            else:
+                published_at = None
+            
+            articles_with_sentiment.append({
+                'news': news,
+                'sentiment_score': float(sentiment_score),
+                'sentiment_label': label,
+                'published_at': published_at,
+                'importance': abs(float(sentiment_score))  # Magnitude for importance ranking
+            })
 
-        if news_summary.get('recent_sentiment'):
-            sections.append(f"  7-Day Average: {news_summary.get('recent_sentiment', 0):.3f}")
+        if not articles_with_sentiment:
+            sections.append(
+                f"No news articles with sentiment scores available for {ticker}."
+            )
+            return sections
+
+        # Sort by recency first (most recent first), then by importance (sentiment magnitude)
+        # This ensures we get the 15 most recent and important articles
+        articles_with_sentiment.sort(
+            key=lambda x: (
+                x['published_at'] if x['published_at'] else datetime.min,
+                x['importance']
+            ),
+            reverse=True
+        )
+
+        # Select top 15 most recent and important articles
+        top_articles = articles_with_sentiment[:15]
+
+        sections.append(f"**RECENT NEWS ARTICLES (Top {len(top_articles)} Most Recent & Important)**")
         sections.append("")
-
-        # Sentiment distribution
-        dist = news_summary.get('sentiment_distribution', {})
-        sections.append(f"**SENTIMENT DISTRIBUTION**")
-        sections.append(f"  Positive: {dist.get('positive', 0)} articles")
-        sections.append(f"  Negative: {dist.get('negative', 0)} articles")
-        sections.append(f"  Neutral: {dist.get('neutral', 0)} articles")
-        sections.append("")
-
-        # Recent articles (weighted by confidence) - TOP 15
-        # Sort by confidence and recency
-        all_news.sort(key=lambda n: (n.get('sentiment_confidence', 0), str(n.get('published_at', ''))), reverse=True)
-
-        sections.append(f"**RECENT HEADLINES (Top {min(15, len(all_news))} by Confidence)**")
-        for news in all_news[:15]:  # Top 15 by confidence
-            sentiment_score = news.get('sentiment_score', 0)
-            confidence = news.get('sentiment_confidence', 0.5)
-            label = news.get('sentiment_label', 'neutral')
-
+        
+        for article_data in top_articles:
+            news = article_data['news']
+            sentiment_score = article_data['sentiment_score']
+            label = article_data['sentiment_label']
+            
+            # Determine emoji based on sentiment
             emoji = "📈" if sentiment_score > 0.1 else "📉" if sentiment_score < -0.1 else "➡️"
-            sections.append(f"  {emoji} [{label.upper()} {sentiment_score:.2f}, conf: {confidence:.2f}]")
+            
+            # Format published date if available
+            pub_date_str = ""
+            if article_data['published_at']:
+                pub_date = article_data['published_at']
+                if isinstance(pub_date, datetime):
+                    pub_date_str = f" ({pub_date.strftime('%Y-%m-%d')})"
+            
+            # Display article with sentiment
+            sections.append(f"  {emoji} [{label.upper()} {sentiment_score:.3f}]{pub_date_str}")
             sections.append(f"    {news.get('headline', 'No headline')}")
+            
             if news.get('source'):
                 sections.append(f"    Source: {news['source']}")
+            
+            sections.append("")  # Blank line between articles
 
-        sections.append("")
-
-        return sections
-
-        
-        # Group by sentiment
-        positive_news = [n for n in all_news if n.get('sentiment_score', 0) > 0.1]
-        negative_news = [n for n in all_news if n.get('sentiment_score', 0) < -0.1]
-        neutral_news = [n for n in all_news if -0.1 <= n.get('sentiment_score', 0) <= 0.1]
-        
-        sections.append(f"Total News Articles: {len(all_news)}")
-        sections.append(f"Positive: {len(positive_news)} | Negative: {len(negative_news)} | Neutral: {len(neutral_news)}")
-        sections.append("")
-        
-        # Show recent headlines
-        sections.append("**Recent Headlines:**")
-        for news in all_news[:10]:  # Last 10 articles
-            sentiment_emoji = "??" if news.get('sentiment_score', 0) > 0.1 else "??" if news.get('sentiment_score', 0) < -0.1 else "??"
-            sections.append(f"  {sentiment_emoji} {news.get('headline', 'No headline')}")
-            if news.get('sentiment_score'):
-                sections.append(f"    Sentiment: {news['sentiment_score']:.2f}")
-        
         return sections
     
     def _build_detailed_fundamentals(self, ticker: str, data: List[Dict[str, Any]]) -> List[str]:
@@ -486,6 +533,56 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         
         return sections
     
+    def _build_detailed_analyst_recommendations(self, ticker: str, data: List[Dict[str, Any]]) -> List[str]:
+        """Build detailed analyst recommendations section"""
+        sections = []
+        
+        # Collect all analyst recommendations
+        all_recommendations = []
+        for day_data in data:
+            analyst_recs = day_data.get('analyst_recommendations', [])
+            if analyst_recs and len(analyst_recs) > 0:
+                all_recommendations.extend(analyst_recs)
+        
+        if not all_recommendations:
+            sections.append("No recent analyst recommendations available")
+            return sections
+        
+        # Group by rating
+        rating_counts = {}
+        for rec in all_recommendations:
+            rating = rec.get('rating', 'Unknown')
+            rating_counts[rating] = rating_counts.get(rating, 0) + 1
+        
+        sections.append(f"Total Recommendations: {len(all_recommendations)}")
+        if rating_counts:
+            sections.append("Rating Distribution:")
+            for rating, count in sorted(rating_counts.items(), key=lambda x: x[1], reverse=True):
+                sections.append(f"  {rating}: {count}")
+        sections.append("")
+        
+        # Show recent recommendations
+        sections.append("**Recent Analyst Recommendations:**")
+        # Sort by date (most recent first)
+        sorted_recs = sorted(all_recommendations, key=lambda r: r.get('date', date.min), reverse=True)
+        for rec in sorted_recs[:15]:  # Last 15 recommendations
+            rec_date = rec.get('date', 'Unknown')
+            firm = rec.get('firm', 'Unknown')
+            rating = rec.get('rating', 'N/A')
+            action = rec.get('action', 'N/A')
+            target_price = rec.get('target_price')
+            insights = rec.get('analyst_insights', '')
+            
+            sections.append(f"  {rec_date}: {firm} - {action} to {rating}")
+            if target_price:
+                sections.append(f"    Target Price: ${target_price:.2f}")
+            if insights:
+                # Truncate long insights
+                insight_preview = insights[:150] + "..." if len(insights) > 150 else insights
+                sections.append(f"    Insights: {insight_preview}")
+        
+        return sections
+    
     def _build_weekly_technical_summaries(self, data: List[Dict[str, Any]]) -> List[str]:
         """Build weekly technical summaries for medium-term data"""
         sections = []
@@ -527,11 +624,30 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         all_news = []
         for day_data in data:
             if day_data.get('news'):
-                for news in day_data['news']:
-                    all_news.append({
-                        'date': day_data['date'],
-                        'sentiment': news.get('sentiment_score', 0)
-                    })
+                news_data = day_data['news']
+                # News can be a dict with 'recent_articles' and 'older_articles' or a list
+                if isinstance(news_data, dict):
+                    if 'recent_articles' in news_data:
+                        for news in news_data['recent_articles']:
+                            if isinstance(news, dict):
+                                all_news.append({
+                                    'date': day_data['date'],
+                                    'sentiment': news.get('sentiment_score', 0) or 0
+                                })
+                    if 'older_articles' in news_data:
+                        for news in news_data['older_articles']:
+                            if isinstance(news, dict):
+                                all_news.append({
+                                    'date': day_data['date'],
+                                    'sentiment': news.get('sentiment_score', 0) or 0
+                                })
+                elif isinstance(news_data, list):
+                    for news in news_data:
+                        if isinstance(news, dict):
+                            all_news.append({
+                                'date': day_data['date'],
+                                'sentiment': news.get('sentiment_score', 0) or 0
+                            })
         
         if not all_news:
             sections.append("No news data available for this period")
@@ -570,14 +686,16 @@ Focus on generating the most comprehensive and actionable investment thesis poss
             return sections
         
         sections.append("**Key Macro Indicators:**")
-        if latest_macro.get('yield_curve_spread'):
-            sections.append(f"  Yield Curve Spread: {latest_macro['yield_curve_spread']:.2f}%")
-        if latest_macro.get('cpi_monthly_change'):
-            sections.append(f"  CPI Monthly Change: {latest_macro['cpi_monthly_change']:+.2f}%")
-        if latest_macro.get('gdp_quarterly_change'):
-            sections.append(f"  GDP Quarterly Change: {latest_macro['gdp_quarterly_change']:+.2f}%")
-        if latest_macro.get('unemployment_rate_change'):
+        if latest_macro.get('yield_curve_10y_2y') is not None:
+            sections.append(f"  Yield Curve (10Y-2Y): {latest_macro['yield_curve_10y_2y']:.2f}%")
+        if latest_macro.get('cpi_monthly_pct') is not None:
+            sections.append(f"  CPI Monthly Change: {latest_macro['cpi_monthly_pct']:+.2f}%")
+        if latest_macro.get('gdp_qoq_pct') is not None:
+            sections.append(f"  GDP QoQ Change: {latest_macro['gdp_qoq_pct']:+.2f}%")
+        if latest_macro.get('unemployment_rate_change') is not None:
             sections.append(f"  Unemployment Rate Change: {latest_macro['unemployment_rate_change']:+.2f}%")
+        if latest_macro.get('fed_funds_rate') is not None:
+            sections.append(f"  Fed Funds Rate: {latest_macro['fed_funds_rate']:.2f}%")
         
         return sections
     
