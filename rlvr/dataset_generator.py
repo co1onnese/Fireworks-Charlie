@@ -213,6 +213,7 @@ class RLVRDatasetGenerator:
             FROM thesis_generations tg
             JOIN tickers t ON tg.ticker_id = t.ticker_id
             WHERE tg.assistant_response IS NOT NULL
+              AND tg.assistant_response::text NOT LIKE '%"cleared":true%'
         """)
         
         params = {}
@@ -412,6 +413,10 @@ class RLVRDatasetGenerator:
         Returns:
             True if valid, False otherwise
         """
+        # Skip placeholder responses (cleared values)
+        if isinstance(response, dict) and response.get("cleared") is True:
+            return False
+        
         required_fields = ['reasoning', 'action', 'support']
         return all(field in response for field in required_fields)
     

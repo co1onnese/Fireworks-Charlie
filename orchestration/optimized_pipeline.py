@@ -1,12 +1,17 @@
+#!/usr/bin/env python3
 """
-Main pipeline orchestrator for Fireworks-Charlie
-Coordinates data collection, prompt building, and thesis generation
+Optimized pipeline that skips data collection and goes straight to prompt generation.
+This uses existing database data to regenerate prompts efficiently.
 """
+import sys
 import logging
 from datetime import date, datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 import traceback
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestration.config_manager import config
 from orchestration.market_calendar import MarketCalendar
@@ -22,14 +27,14 @@ from utils.logger import setup_logger
 
 # Set up logging
 logger = setup_logger(
-    name="fireworks_charlie",
-    log_file=config.LOG_FILE,
+    name="fireworks_charlie_optimized",
+    log_file=config.LOG_FILE.replace(".log", "_optimized.log"),
     log_level=config.LOG_LEVEL
 )
 
-class FireworksCharliePipeline:
-    """Main pipeline for cumulative thesis generation"""
-    
+class OptimizedFireworksCharliePipeline:
+    """Optimized pipeline that skips data collection and uses existing data."""
+
     def __init__(self):
         """Initialize pipeline components"""
         # Log configuration
@@ -43,7 +48,7 @@ class FireworksCharliePipeline:
         # Initialize shared database manager (reuse across all operations)
         from data_collection.database_manager import DatabaseManager
         self.db_manager = DatabaseManager(config.DB_URL)
-        logger.info("Shared DatabaseManager initialized for pipeline")
+        logger.info("Shared DatabaseManager initialized for optimized pipeline")
 
         # Initialize context compression
         self.context_compressor = ContextCompressor(
@@ -51,7 +56,7 @@ class FireworksCharliePipeline:
             max_days_medium=config.MAX_DAYS_MEDIUM,
             max_days_historical=config.MAX_DAYS_HISTORICAL
         )
-        
+
         # Initialize LLM client using factory pattern
         provider = config.LLM_PROVIDER
         api_key_available = False
@@ -71,10 +76,6 @@ class FireworksCharliePipeline:
             try:
                 logger.info(f"Initializing LLM client with provider: {provider}")
                 self.llm_client = create_llm_client(provider, config)
-
-                # Test connection (disabled for now to avoid hanging)
-                # if not self.llm_client.test_connection():
-                #     logger.warning(f"{provider.capitalize()} API connection test failed")
                 logger.info(f"✓ LLM client initialized (connection test disabled)")
             except Exception as e:
                 logger.error(f"Failed to initialize LLM client: {e}")
@@ -83,33 +84,22 @@ class FireworksCharliePipeline:
             logger.warning(f"No {key_name} provided - thesis generation disabled")
             self.llm_client = None
 
-        logger.info("FireworksCharliePipeline initialized successfully")
-    
+        logger.info("OptimizedFireworksCharliePipeline initialized successfully")
+
     def run(self,
             tickers: List[str] = None,
             start_date: str = None,
             end_date: str = None,
-            skip_existing: bool = True,
             resume: bool = True) -> Dict[str, Any]:
         """
-        Run the complete pipeline
+        Run the optimized pipeline (skips data collection)
 
-        Args:
-            tickers: List of ticker symbols (default: from config)
-            start_date: Start date as ISO string (YYYY-MM-DD)
-            end_date: End date as ISO string (YYYY-MM-DD)
-            skip_existing: If True, skip existing data and fill gaps only (default: True)
-            resume: Whether to resume from checkpoints
-
-        Returns:
-        Run the full pipeline
-        
         Args:
             tickers: List of tickers (uses config if not provided)
             start_date: Start date YYYY-MM-DD (uses config if not provided)
             end_date: End date YYYY-MM-DD (uses config if not provided)
             resume: Whether to resume from checkpoints
-            
+
         Returns:
             Pipeline execution summary
         """
@@ -117,18 +107,23 @@ class FireworksCharliePipeline:
         tickers = tickers or config.TICKERS
         start_date = date.fromisoformat(start_date) if start_date else date.fromisoformat(config.START_DATE)
         end_date = date.fromisoformat(end_date) if end_date else date.fromisoformat(config.END_DATE)
-        
-        logger.info(f"Starting pipeline for {len(tickers)} tickers from {start_date} to {end_date}")
-        
+
+        logger.info(f"Starting OPTIMIZED pipeline for {len(tickers)} tickers from {start_date} to {end_date}")
+        logger.info("⚠️  SKIPPING DATA COLLECTION PHASE - Using existing database data")
+
         # Get trading days
         trading_days = self.market_calendar.get_trading_days(start_date, end_date)
         logger.info(f"Found {len(trading_days)} trading days to process")
-        
-        # First, ensure we have collected all necessary data
-        logger.info("Phase 1: Data Collection")
-        data_collection_results = self._run_data_collection(tickers, start_date, end_date)
-        
-        # Then, process each ticker for thesis generation
+
+        # Skip data collection phase entirely
+        logger.info("Phase 1: Data Collection - SKIPPED (using existing data)")
+        data_collection_results = {
+            "status": "skipped",
+            "reason": "using_existing_data",
+            "tickers": {ticker: {"status": "skipped", "reason": "using_existing_data"} for ticker in tickers}
+        }
+
+        # Process each ticker for thesis generation
         logger.info("Phase 2: Thesis Generation")
 
         # Create executor with 1 worker per ticker for true parallelization
@@ -146,6 +141,8 @@ class FireworksCharliePipeline:
         }
 
         # Process all tickers in parallel with dynamic worker allocation
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             # Submit all tickers for parallel processing
             futures = []
@@ -177,121 +174,36 @@ class FireworksCharliePipeline:
                         "error": str(e)
                     }
                     results["summary"]["failures"] += 1
-        
+
         logger.info(
-            f"Pipeline completed: {results['summary']['tickers_processed']} tickers, "
+            f"Optimized pipeline completed: {results['summary']['tickers_processed']} tickers, "
             f"{results['summary']['total_theses']} theses, "
             f"{results['summary']['failures']} failures"
         )
-        
+
         return results
-    
-    def _run_data_collection(self,
-                           tickers: List[str],
-                           start_date: date,
-                           end_date: date,
-                           skip_existing: bool = True) -> Dict[str, Any]:
-        """Run data collection phase
 
-        Args:
-            tickers: List of ticker symbols
-            start_date: Start date for data collection
-            end_date: End date for data collection
-            skip_existing: If True, skip existing data and fill gaps only (default: True)
-
-        Returns:
-            Dictionary with collection results
-        """
-        results = {
-            "tickers": {},
-            "macro": {},
-            "feature_engineering": {}
-        }
-
-        if skip_existing:
-            logger.info("=" * 80)
-            logger.info("SMART DATA COLLECTION MODE: Skipping existing data, filling gaps only")
-            logger.info("=" * 80)
-        else:
-            logger.info("=" * 80)
-            logger.info("FORCE REFRESH MODE: Re-fetching all data")
-            logger.info("=" * 80)
-
-        # Collect data for each ticker (with extended lookback for better data coverage)
-        for ticker in tickers:
-            logger.info(f"\nCollecting data for {ticker}")
-
-            if skip_existing:
-                # Smart collection: Check for gaps first
-                gaps = self.data_orchestrator.identify_data_gaps(ticker, start_date, end_date)
-
-                logger.info("  Identified gaps:")
-                if gaps['technical']:
-                    logger.info(f"    Technical: {len(gaps['technical'])} gap(s)")
-                if gaps['fundamental']:
-                    logger.info(f"    Fundamental: {len(gaps['fundamental'])} gap(s)")
-                if gaps['news']:
-                    logger.info(f"    News: {len(gaps['news'])} gap(s)")
-                if gaps['macro']:
-                    logger.info(f"    Macro: {len(gaps['macro'])} gap(s)")
-
-                # If no gaps found, skip collection entirely
-                if not any(gaps.values()):
-                    logger.info("  ✅ No gaps found - data already complete. Skipping collection.")
-                    results["tickers"][ticker] = {
-                        "status": "skipped",
-                        "reason": "no_gaps",
-                        "ticker": ticker
-                    }
-                    continue
-
-            # Collect data (with extended lookback for better data coverage)
-            # Pass skip_existing flag to the data orchestrator
-            result = self.data_orchestrator.collect_data_for_ticker(
-                ticker,
-                start_date,
-                end_date,
-                technical_lookback_days=config.TECHNICAL_LOOKBACK_DAYS,
-                fundamental_lookback_months=config.FUNDAMENTAL_LOOKBACK_MONTHS,
-                skip_existing=skip_existing
-            )
-            results["tickers"][ticker] = result
-        
-        # Collect macro data
-        logger.info("Collecting macroeconomic data")
-        results["macro"] = self.data_orchestrator.collect_macro_data(
-            start_date, end_date
-        )
-        
-        # Run feature engineering
-        logger.info("Running feature engineering")
-        results["feature_engineering"] = self.data_orchestrator.run_feature_engineering(
-            tickers, start_date, end_date
-        )
-        
-        return results
-    
-    def _process_ticker(self, 
-                       ticker: str, 
+    def _process_ticker(self,
+                       ticker: str,
                        trading_days: List[date],
                        resume: bool) -> Dict[str, Any]:
         """
-        Process a single ticker through all trading days
-        
+        Process a single ticker through all trading days using existing data
+
         Args:
             ticker: Stock ticker symbol
             trading_days: List of trading days to process
             resume: Whether to resume from checkpoint
-            
+
         Returns:
             Processing results for the ticker
         """
         logger.info(f"Processing ticker: {ticker}")
-        
+
         # Initialize components for this ticker
         deduplicator = DataDeduplicator()
         prompt_builder = CumulativePromptBuilder(deduplicator)
-        
+
         # Check for existing checkpoint
         start_from_date = None
         cumulative_data = []
@@ -312,17 +224,17 @@ class FireworksCharliePipeline:
         # Track results
         theses_generated = 0
         errors = []
-        
+
         # Process each trading day
         for trading_day in trading_days:
             # Skip if already processed
             if start_from_date and trading_day <= start_from_date:
                 continue
-            
+
             try:
-                # Get data for this day
+                # Get data for this day FROM EXISTING DATABASE (no API calls)
                 day_data = self.data_orchestrator.get_data_for_date(ticker, trading_day)
-                
+
                 # Ensure day_data is a dict
                 if not isinstance(day_data, dict):
                     logger.error(f"get_data_for_date returned non-dict for {ticker} on {trading_day}: {type(day_data)}")
@@ -331,7 +243,7 @@ class FireworksCharliePipeline:
                         "error": f"Invalid return type: {type(day_data)}"
                     })
                     continue
-                
+
                 if "error" in day_data:
                     logger.error(f"Failed to get data for {ticker} on {trading_day}: {day_data.get('error', 'Unknown error')}")
                     errors.append({
@@ -339,7 +251,7 @@ class FireworksCharliePipeline:
                         "error": day_data.get("error", "Unknown error")
                     })
                     continue
-                
+
                 # Add to cumulative data
                 cumulative_data.append(day_data)
 
@@ -388,14 +300,14 @@ class FireworksCharliePipeline:
                     )
                 else:
                     logger.info(f"Token usage for {ticker} on {trading_day}: {estimated_tokens:,} tokens")
-                
+
                 # Generate thesis using Fireworks client
                 if self.llm_client:
                     logger.info(f"Generating thesis for {ticker} on {trading_day}")
-                    
+
                     # Combine system and user prompts
                     combined_prompt = f"{system_prompt}\n\n{user_prompt}"
-                    
+
                     try:
                         thesis_result = self.llm_client.generate_thesis(
                             prompt=combined_prompt,
@@ -409,7 +321,7 @@ class FireworksCharliePipeline:
                             "error": f"LLM exception: {str(llm_exception)}"
                         })
                         continue
-                    
+
                     # Ensure thesis_result is a dict
                     if not isinstance(thesis_result, dict):
                         logger.error(f"generate_thesis returned non-dict for {ticker} on {trading_day}: {type(thesis_result)}, value: {str(thesis_result)[:200]}")
@@ -418,7 +330,7 @@ class FireworksCharliePipeline:
                             "error": f"LLM returned invalid type: {type(thesis_result)}"
                         })
                         continue
-                    
+
                     # Ensure status key exists
                     if "status" not in thesis_result:
                         logger.error(f"generate_thesis returned dict without 'status' for {ticker} on {trading_day}: {list(thesis_result.keys())}")
@@ -427,7 +339,7 @@ class FireworksCharliePipeline:
                             "error": "LLM returned dict without 'status' key"
                         })
                         continue
-                    
+
                     if thesis_result.get("status") == "success":
                         # Save to database and checkpoint
                         session = None
@@ -495,13 +407,13 @@ class FireworksCharliePipeline:
                                             response_data = json.loads(existing_thesis.assistant_response)
                                         else:
                                             response_data = existing_thesis.assistant_response
-                                        
+
                                         # Check if it's the placeholder value
                                         if isinstance(response_data, dict) and response_data.get("cleared") is True:
                                             is_placeholder = True
                                     except (json.JSONDecodeError, TypeError, AttributeError):
                                         pass
-                                
+
                                 # If thesis exists and has valid assistant_response (not placeholder), skip
                                 if existing_thesis.assistant_response is not None and not is_placeholder:
                                     logger.info(
@@ -640,21 +552,21 @@ class FireworksCharliePipeline:
                         "date": trading_day,
                         "error": error_msg
                     })
-                
+
             except Exception as e:
                 # Get error message safely
                 error_msg = str(e)
                 error_type = type(e).__name__
                 error_traceback = traceback.format_exc()
-                
+
                 logger.error(f"Error processing {ticker} on {trading_day}: {error_type}: {error_msg}")
                 logger.error(f"Full traceback:\n{error_traceback}")
-                
+
                 errors.append({
                     "date": trading_day,
                     "error": f"{error_type}: {error_msg}"
                 })
-        
+
         # Get final statistics from database
         session = None
         try:
@@ -715,17 +627,20 @@ class FireworksCharliePipeline:
             "trading_days_processed": len([d for d in trading_days if not start_from_date or d > start_from_date]),
             "already_complete": already_complete
         }
-    
-    def cleanup(self):
-        """Clean up resources"""
-        logger.info("Shutting down pipeline")
 
-        # Dispose database engine to release all connections
-        if hasattr(self, 'db_manager') and self.db_manager:
-            logger.info("Disposing database engine and releasing connections")
-            self.db_manager.engine.dispose()
 
-        # Clean old checkpoints
-        deleted = self.checkpoint_manager.clean_old_checkpoints(days_to_keep=7)
-        if deleted > 0:
-            logger.info(f"Cleaned {deleted} old checkpoints")
+def main():
+    """Main entry point for optimized pipeline."""
+    pipeline = OptimizedFireworksCharliePipeline()
+
+    try:
+        results = pipeline.run()
+        logger.info("Optimized pipeline completed successfully!")
+        return results
+    except Exception as e:
+        logger.error(f"Optimized pipeline failed: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    main()

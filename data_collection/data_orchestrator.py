@@ -616,15 +616,15 @@ class DataOrchestrator:
             # Log fundamental data age for monitoring
             if fundamentals:
                 data_age_days = (as_of_date - fundamentals.filing_date).days
-                if data_age_days > 180:
+                if data_age_days > 90:
                     logger.warning(
-                        f"{ticker} on {as_of_date}: Fundamental data is {data_age_days} days old "
-                        f"(filing_date: {fundamentals.filing_date}). Data may be stale."
+                        f"{ticker} on {as_of_date}: Fundamental data is {data_age_days} days stale "
+                        f"(latest filing: {fundamentals.filing_date})"
                     )
-                elif data_age_days > 120:
-                    logger.debug(
+                elif data_age_days > 60:
+                    logger.info(
                         f"{ticker} on {as_of_date}: Fundamental data is {data_age_days} days old "
-                        f"(filing_date: {fundamentals.filing_date})"
+                        f"(latest filing: {fundamentals.filing_date})"
                     )
             else:
                 logger.warning(
@@ -912,3 +912,118 @@ class DataOrchestrator:
             "amount": float(insider.transaction_amount) if insider.transaction_amount else None,  # Alias for backward compatibility
             "shares_owned_after": insider.shares_owned_after,
         }
+
+    def check_data_freshness(self, ticker: str, as_of_date: date) -> Dict[str, Any]:
+        """
+        Comprehensive data freshness check for a ticker on a specific date
+
+        Args:
+            ticker: Ticker symbol
+            as_of_date: Date to check data freshness for
+
+        Returns:
+            Dictionary with freshness metrics and warnings
+        """
+        from .database_manager import DatabaseManager, Ticker, Fundamental, MarketData, News
+
+        db_manager = DatabaseManager(self.config.DB_URL)
+        session = db_manager.get_session()
+
+        try:
+            # Get ticker object
+            ticker_obj = session.query(Ticker).filter(Ticker.symbol == ticker).first()
+            if not ticker_obj:
+                return {
+                    "ticker": ticker,
+                    "as_of_date": as_of_date,
+                    "error": "Ticker not found in database"
+                }
+
+            freshness_report = {
+                "ticker": ticker,
+                "as_of_date": as_of_date,
+                "fundamentals": {},
+                "market_data": {},
+                "news": {},
+                "warnings": []
+            }
+
+            # Check fundamental data freshness
+            fundamentals = session.query(Fundamental).filter(
+                Fundamental.ticker_id == ticker_obj.ticker_id,
+                Fundamental.filing_date < as_of_date
+            ).order_by(Fundamental.filing_date.desc()).first()
+
+            if fundamentals:
+                data_age_days = (as_of_date - fundamentals.filing_date).days
+                freshness_report["fundamentals"] = {
+                    "latest_filing_date": fundamentals.filing_date,
+                    "days_stale": data_age_days,
+                    "status": "stale" if data_age_days > 90 else "fresh"
+                }
+                if data_age_days > 90:
+                    freshness_report["warnings"].append(
+                        f"Fundamental data is {data_age_days} days stale (latest filing: {fundamentals.filing_date})"
+                    )
+            else:
+                freshness_report["fundamentals"] = {
+                    "latest_filing_date": None,
+                    "days_stale": None,
+                    "status": "missing"
+                }
+                freshness_report["warnings"].append("No fundamental data available")
+
+            # Check market data freshness
+            market_data = session.query(MarketData).filter(
+                MarketData.ticker_id == ticker_obj.ticker_id,
+                MarketData.date < as_of_date
+            ).order_by(MarketData.date.desc()).first()
+
+            if market_data:
+                data_age_days = (as_of_date - market_data.date).days
+                freshness_report["market_data"] = {
+                    "latest_date": market_data.date,
+                    "days_stale": data_age_days,
+                    "status": "stale" if data_age_days > 30 else "fresh"
+                }
+                if data_age_days > 30:
+                    freshness_report["warnings"].append(
+                        f"Market data is {data_age_days} days stale (latest: {market_data.date})"
+                    )
+            else:
+                freshness_report["market_data"] = {
+                    "latest_date": None,
+                    "days_stale": None,
+                    "status": "missing"
+                }
+                freshness_report["warnings"].append("No market data available")
+
+            # Check news data freshness
+            news_data = session.query(News).filter(
+                News.ticker_id == ticker_obj.ticker_id,
+                News.published_at < as_of_date
+            ).order_by(News.published_at.desc()).first()
+
+            if news_data:
+                data_age_days = (as_of_date - news_data.published_at.date()).days
+                freshness_report["news"] = {
+                    "latest_article_date": news_data.published_at.date(),
+                    "days_stale": data_age_days,
+                    "status": "stale" if data_age_days > 7 else "fresh"
+                }
+                if data_age_days > 7:
+                    freshness_report["warnings"].append(
+                        f"News data is {data_age_days} days stale (latest article: {news_data.published_at.date()})"
+                    )
+            else:
+                freshness_report["news"] = {
+                    "latest_article_date": None,
+                    "days_stale": None,
+                    "status": "missing"
+                }
+                freshness_report["warnings"].append("No news data available")
+
+            return freshness_report
+
+        finally:
+            session.close()
