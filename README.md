@@ -39,16 +39,15 @@ python main.py --tickers AAPL,MSFT,NFLX --start-date 2024-01-01 --end-date 2024-
 # Phase 2: Generate RLVR Datasets
 python rlvr_main.py generate --tickers AAPL,MSFT,NFLX --output-dir storage/rlvr_datasets
 
-# Phase 3: Test & Deploy Reward Function
-python rlvr_main.py test-local --sample
-python rlvr_main.py deploy
+# Phase 3: Start Evalprotocol Server
+python rlvr/run_evalprotocol_server.py --reload
 
 # Phase 4: Submit GRPO Training Job (via Fireworks Dashboard)
 # Navigate to https://fireworks.ai/fine-tuning
 # Select "Reinforcement" method
 # Upload train.jsonl and dev.jsonl
 # Select base model (llama-v3p1-8b-instruct recommended)
-# Select evaluator: stock-prediction-evaluator
+# Configure evaluator: Use HTTP endpoint http://localhost:8000/init
 # Launch training job
 
 # Phase 5: Monitor Training
@@ -85,6 +84,223 @@ External APIs          Database              Fireworks AI
                       │  7. Model Evaluation (A/B/C)     │
                       └──────────────────────────────────┘
 ```
+
+---
+
+## 🚀 NEW: Evalprotocol Server (v2.1+)
+
+**BREAKING CHANGE**: The reward function system has been completely redesigned to use the new evalprotocol HTTP API standard instead of the legacy reward-kit framework.
+
+### Migration from Reward-Kit to Evalprotocol
+
+**What Changed**:
+- ❌ **Old**: `@reward_function` decorator with reward-kit deployment
+- ✅ **New**: FastAPI HTTP server with POST `/init` endpoint
+- ✅ **Maintained**: All existing reward calculation logic and metrics
+- ✅ **Enhanced**: True "Ground Truth" evaluation with 3-day performance tracking
+
+**Why the Change**:
+Fireworks.ai updated their API requirements to use evalprotocol standards for better scalability, monitoring, and integration with their RLVR training infrastructure.
+
+### Quick Start - Evalprotocol Server
+
+#### 1. Install Evalprotocol Dependencies
+
+```bash
+# Install additional dependencies for evalprotocol server
+pip install -r rlvr/requirements_evalprotocol.txt
+```
+
+#### 2. Start the Server (Development)
+
+```bash
+# Start with auto-reload for development
+python rlvr/run_evalprotocol_server.py --reload --log-level debug
+
+# Or with basic configuration
+python rlvr/run_evalprotocol_server.py
+```
+
+Server starts on `http://localhost:8000`
+
+#### 3. Start the Server (Production)
+
+```bash
+# Using Docker Compose (recommended)
+cd rlvr
+docker-compose -f docker-compose.evalprotocol.yml up -d
+
+# Or using Gunicorn
+gunicorn rlvr.evalprotocol_server:app \
+  -w 4 \
+  -k uvicorn.workers.UvicornWorker \
+  --bind 0.0.0.0:8000
+```
+
+#### 4. Health Check
+
+```bash
+# Test server is running
+curl http://localhost:8000/health
+
+# Expected response:
+# {"status": "healthy", "service": "evalprotocol-server"}
+```
+
+#### 5. Stop the Server
+
+```bash
+# Development server: Ctrl+C
+
+# Docker Compose:
+docker-compose -f rlvr/docker-compose.evalprotocol.yml down
+
+# Gunicorn: Kill the process or use process manager
+```
+
+### Evalprotocol Server Features
+
+#### Ground Truth Stock Evaluation
+The server evaluates stock predictions against **actual 3-day market performance**:
+
+1. **Receives Prediction**: Stock analysis with buy/sell/hold recommendation
+2. **Tracks Position**: Monitors actual stock price for 3 trading days
+3. **Calculates Return**: Measures real performance: `(exit_price - entry_price) / entry_price × 100`
+4. **Multi-Metric Scoring**: Uses sophisticated 6-component reward system
+5. **Returns Evaluation**: Provides detailed score breakdown and reasoning
+
+#### API Endpoints
+
+**POST /init** - Main evaluation endpoint
+```bash
+curl -X POST http://localhost:8000/init \
+  -H "Content-Type: application/json" \
+  -d '{
+    "completion_params": {"model": "gpt-4", "temperature": 0.7},
+    "messages": [
+      {"role": "user", "content": "Analyze AAPL stock"},
+      {"role": "assistant", "content": "{\"action\": \"buy\", \"reasoning\": \"Strong fundamentals\", \"support\": \"Revenue growth\"}"}
+    ],
+    "tools": [],
+    "model_base_url": "https://api.openai.com",
+    "metadata": {"rollout_id": "test-123"},
+    "api_key": "your-key"
+  }'
+```
+
+**Response Format**:
+```json
+{
+  "status": "success",
+  "rollout_id": "test-123",
+  "evaluation": {
+    "score": 0.85,
+    "reason": "R:0.850 | Dir:✓ | Mag:0.92 | Sharpe:0.65 | Cal:0.80 | buy→+2.3%",
+    "metrics": {
+      "directional_accuracy": {"score": 1.0, "success": true},
+      "magnitude_accuracy": {"score": 0.92, "success": true},
+      "sharpe_score": {"score": 0.65, "success": true},
+      "confidence_calibration": {"score": 0.80, "success": true},
+      "downside_protection": {"score": 0.95},
+      "reasoning_quality": {"score": 0.75, "success": true}
+    },
+    "actual_return_pct": 2.3,
+    "prediction": {"action": "buy", "symbol": "AAPL"}
+  }
+}
+```
+
+**GET /health** - Health check endpoint
+```bash
+curl http://localhost:8000/health
+```
+
+### Configuration Requirements
+
+#### Environment Variables
+
+```env
+# Database Connection (required)
+DATABASE_URL=postgresql://user:password@localhost:5432/fireworks_charlie
+
+# Alternative database config
+DB_HOST=localhost
+DB_NAME=fireworks_charlie
+DB_USER=your_user
+DB_PASSWORD=your_password
+DB_PORT=5432
+
+# Server Configuration (optional)
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8000
+LOG_LEVEL=info
+
+# Fireworks Tracing (for production)
+FIREWORKS_API_KEY=fw_xxx
+```
+
+#### Docker Environment
+
+```bash
+# Start complete environment with database
+cd rlvr
+docker-compose -f docker-compose.evalprotocol.yml up -d
+
+# Services started:
+# - evalprotocol-server (port 8000)
+# - postgres (port 5432)
+# - redis (port 6379)
+```
+
+### Testing the Evalprotocol Server
+
+```bash
+# Run comprehensive test suite
+python rlvr/run_tests.py --verbose --coverage
+
+# Run specific tests
+pytest rlvr/tests/test_evalprotocol_server.py -v
+
+# Test server manually
+python -c "
+import requests
+response = requests.get('http://localhost:8000/health')
+print(f'Status: {response.status_code}')
+print(f'Response: {response.json()}')
+"
+```
+
+### Migration Guide
+
+#### For Existing Users
+
+1. **Update Dependencies**:
+   ```bash
+   pip install -r rlvr/requirements_evalprotocol.txt
+   ```
+
+2. **Start Evalprotocol Server**:
+   ```bash
+   python rlvr/run_evalprotocol_server.py
+   ```
+
+3. **Update Training Jobs**:
+   - Use the new HTTP server endpoint instead of deployed reward functions
+   - No changes needed to dataset format or training configuration
+   - All existing reward calculation logic is preserved
+
+#### Backward Compatibility
+
+- ❌ **Old reward-kit deployment commands will not work**
+- ✅ **All existing datasets remain compatible**
+- ✅ **All reward calculation logic is preserved**
+- ✅ **Database schema unchanged**
+
+### Detailed Documentation
+
+For complete implementation details, API specifications, and advanced configuration:
+
+📖 **[Evalprotocol Server Documentation](rlvr/README_evalprotocol.md)**
 
 ---
 
@@ -211,28 +427,34 @@ python rlvr_main.py generate \
 
 ---
 
-### Workflow 3: Reward Function Deployment
+### Workflow 3: Evalprotocol Server Setup
 
-**Test Locally**:
+**Start Development Server**:
 ```bash
-python rlvr_main.py test-local --sample
+python rlvr/run_evalprotocol_server.py --reload --log-level debug
 ```
 
-**Deploy to Fireworks AI**:
+**Start Production Server**:
 ```bash
-python rlvr_main.py deploy
+cd rlvr
+docker-compose -f docker-compose.evalprotocol.yml up -d
+```
+
+**Test Server**:
+```bash
+curl http://localhost:8000/health
 ```
 
 **Expected Output**:
-```
-Deploying reward function...
-Evaluator deployed successfully!
-Evaluator ID: stock-prediction-evaluator
+```json
+{"status": "healthy", "service": "evalprotocol-server"}
 ```
 
-**Advanced vs Simple Reward Function**:
-- **Advanced** (default): 6 metrics, sophisticated evaluation, better training signals
-- **Simple**: 2 metrics (directional + sharpe), faster, basic evaluation
+**Server Features**:
+- **Ground Truth Evaluation**: Real 3-day stock performance tracking
+- **Multi-Metric Scoring**: 6 sophisticated evaluation components
+- **HTTP API**: RESTful endpoint for RLVR training integration
+- **Fireworks Tracing**: Integrated logging and status reporting
 
 ---
 
@@ -253,8 +475,10 @@ Evaluator ID: stock-prediction-evaluator
 4. **Select Base Model**
    - Recommended: `accounts/fireworks/models/llama-v3p1-8b-instruct`
 
-5. **Select Evaluator**
-   - Critical: Select `stock-prediction-evaluator`
+5. **Configure Evaluator**
+   - **Method**: HTTP Endpoint
+   - **URL**: `http://localhost:8000/init` (or your server URL)
+   - **Critical**: Ensure evalprotocol server is running before training
 
 6. **Configure Parameters**
    - Epochs: 1 (start with 1)
@@ -368,11 +592,25 @@ python main.py [--tickers TICKERS] [--start-date DATE] [--end-date DATE] [--no-r
 ```bash
 python rlvr_main.py validate     # Validate setup
 python rlvr_main.py generate     # Generate datasets
-python rlvr_main.py test-local   # Test reward function
-python rlvr_main.py deploy       # Deploy to Fireworks AI
 python rlvr_main.py train        # Submit training job
 python rlvr_main.py status       # Check training status
 python rlvr_main.py stats        # Show statistics
+```
+
+### Evalprotocol Server Commands
+```bash
+# Start development server
+python rlvr/run_evalprotocol_server.py [--reload] [--log-level debug]
+
+# Run tests
+python rlvr/run_tests.py [--verbose] [--coverage]
+
+# Docker deployment
+docker-compose -f rlvr/docker-compose.evalprotocol.yml up -d
+docker-compose -f rlvr/docker-compose.evalprotocol.yml down
+
+# Health check
+curl http://localhost:8000/health
 ```
 
 ### Utilities
@@ -463,13 +701,19 @@ python scripts/check_model_status.py \
 python scripts/backfill_positions.py --execute --yes
 ```
 
-### "Reward function deployment failed"
-**Cause**: `reward-kit` not installed or misconfigured.
+### "Evalprotocol server not responding"
+**Cause**: Server not started or misconfigured.
 
 **Solution**:
 ```bash
-uv pip install --upgrade 'fireworks-ai[reward-kit]'
-python rlvr_main.py deploy
+# Check if server is running
+curl http://localhost:8000/health
+
+# Start server if not running
+python rlvr/run_evalprotocol_server.py --reload
+
+# Check logs for errors
+python rlvr/run_evalprotocol_server.py --log-level debug
 ```
 
 ### "Insufficient future data"
@@ -501,16 +745,34 @@ python scripts/check_model_status.py \
 
 **Solution**:
 1. Check dataset has `ground_truth` field
-2. Verify evaluator deployed correctly
-3. Test locally: `python rlvr_main.py test-local --sample`
+2. Verify evalprotocol server is running: `curl http://localhost:8000/health`
+3. Test server manually with sample prediction
+4. Check server logs for evaluation errors
 
 ### Training job fails immediately
-**Error**: "ExecutionError: [Sandbox] No module named 'rlvr'"
+**Error**: "ExecutionError: Connection refused" or "Evaluator endpoint unreachable"
 
 **Solution**:
-1. Verify reward function is self-contained (no external imports)
-2. Redeploy reward function
-3. Create NEW training job (don't reuse old one)
+1. Ensure evalprotocol server is running and accessible
+2. Verify server URL is correct in training job configuration
+3. Check firewall/network settings if using remote server
+4. Test endpoint manually: `curl -X POST http://localhost:8000/init`
+
+### "Database connection failed"
+**Cause**: Evalprotocol server cannot connect to PostgreSQL.
+
+**Solution**:
+```bash
+# Check database connection
+python -c "
+from data_collection.database_manager import DatabaseManager
+db = DatabaseManager()
+print('Database connection: OK')
+"
+
+# Update DATABASE_URL environment variable
+export DATABASE_URL="postgresql://user:password@localhost:5432/fireworks_charlie"
+```
 
 ---
 
@@ -523,8 +785,13 @@ uv pip install -e ".[dev]"
 
 ### Run Tests
 ```bash
+# All tests
 pytest tests/ -v
 pytest tests/test_evaluate_model.py -v  # 65 tests
+
+# Evalprotocol server tests
+python rlvr/run_tests.py --verbose --coverage
+pytest rlvr/tests/test_evalprotocol_server.py -v
 ```
 
 ### Code Quality
@@ -589,10 +856,10 @@ outputs/training/
 
 ## Version & Dependencies
 
-- **Version**: 2.1
+- **Version**: 2.1 (**NEW**: Evalprotocol Server Support)
 - **Python**: 3.10+
 - **PostgreSQL**: 13+
-- **Fireworks AI**: reward-kit 1.0+
+- **Evalprotocol**: HTTP API standard (replaces reward-kit)
 
 **Core Dependencies**:
 - sqlalchemy (ORM)
@@ -600,6 +867,8 @@ outputs/training/
 - fireworks-ai (Fireworks client)
 - trl, torch, transformers (GRPO training)
 - ta (technical analysis)
+- **NEW**: fastapi, uvicorn (evalprotocol server)
+- **NEW**: eval-protocol (HTTP API standard)
 
 ---
 
@@ -607,6 +876,7 @@ outputs/training/
 
 ### Documentation
 - **Complete Code Reference**: `llms.txt` (1,200+ lines)
+- **Evalprotocol Server**: `rlvr/README_evalprotocol.md` (detailed API docs)
 - **Legacy Documentation**: `docs/` directory (for historical context only)
 
 ### Testing
@@ -634,8 +904,8 @@ python scripts/test_reward_advanced.py
 1. ✅ Setup environment and database
 2. ✅ Run `main.py` for data collection + thesis generation
 3. ✅ Run `rlvr_main.py generate` to create RLVR datasets
-4. ✅ Deploy reward function with `rlvr_main.py deploy`
-5. ✅ Submit GRPO training job via Fireworks dashboard
+4. ✅ **NEW**: Start evalprotocol server with `python rlvr/run_evalprotocol_server.py`
+5. ✅ Submit GRPO training job via Fireworks dashboard (using HTTP evaluator)
 6. ✅ Monitor with `rlvr_main.py status`
 7. ✅ Evaluate model with `scripts/evaluate_model.py`
 8. ✅ Compare strategies and choose best for production

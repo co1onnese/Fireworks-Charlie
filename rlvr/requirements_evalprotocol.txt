@@ -1,0 +1,28 @@
+# Evalprotocol Server Requirements
+# Core evalprotocol dependencies
+eval-protocol>=0.1.0
+
+# FastAPI and server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+
+# Database and ORM
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# Logging and monitoring
+structlog>=23.0.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Development and testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0  # For testing FastAPI endpoints
+
+# Optional: For enhanced development
+python-multipart>=0.0.6  # For form data handling
+python-jose[cryptography]>=3.3.0  # For JWT tokens if needed

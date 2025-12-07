@@ -65,17 +65,32 @@ class ContextCompressor:
             if not day_date:
                 continue
 
+            # Ensure day_date is a date object
+            if isinstance(day_date, str):
+                try:
+                    day_date = date.fromisoformat(day_date)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid date format in cumulative data: {day_date}")
+                    continue
+            elif not isinstance(day_date, date):
+                logger.warning(f"Invalid date type in cumulative data: {type(day_date)}")
+                continue
+
+            # Create a copy of day_data with the converted date
+            processed_day_data = day_data.copy()
+            processed_day_data['date'] = day_date
+
             days_ago = (current_date - day_date).days
 
             if days_ago <= self.max_days_recent:
                 # Keep full detail for recent data
-                recent_data.append(day_data)
+                recent_data.append(processed_day_data)
             elif days_ago <= self.max_days_medium:
                 # Will be summarized
-                medium_data.append(day_data)
+                medium_data.append(processed_day_data)
             elif days_ago <= self.max_days_historical:
                 # Will be compressed to key insights
-                historical_data.append(day_data)
+                historical_data.append(processed_day_data)
             # Else: discard (too old)
 
         compressed = []
@@ -116,7 +131,29 @@ class ContextCompressor:
         # Group by week
         weeks: Dict[date, List[Dict[str, Any]]] = {}
 
-        for day_data in sorted(data, key=lambda x: x['date']):
+        # Ensure all dates are date objects for sorting
+        processed_data = []
+        for day_data in data:
+            day_date = day_data.get('date')
+            if not day_date:
+                continue
+
+            # Ensure day_date is a date object
+            if isinstance(day_date, str):
+                try:
+                    day_date = date.fromisoformat(day_date)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid date format in weekly data: {day_date}")
+                    continue
+            elif not isinstance(day_date, date):
+                logger.warning(f"Invalid date type in weekly data: {type(day_date)}")
+                continue
+
+            processed_day_data = day_data.copy()
+            processed_day_data['date'] = day_date
+            processed_data.append(processed_day_data)
+
+        for day_data in sorted(processed_data, key=lambda x: x['date']):
             # Get Monday of the week
             week_start = day_data['date'] - timedelta(days=day_data['date'].weekday())
 
@@ -223,8 +260,8 @@ class ContextCompressor:
             'high': max(highs) if highs else None,
             'low': min(lows) if lows else None,
             'close': closes[-1] if closes else None,
-            'volume': int(mean(volumes)) if volumes else None,
-            'week_change_pct': ((closes[-1] - opens[0]) / opens[0] * 100) if opens and closes else 0,
+            'volume': int(mean([v for v in volumes if v is not None])) if volumes and any(v is not None for v in volumes) else None,
+            'week_change_pct': ((closes[-1] - opens[0]) / opens[0] * 100) if opens and closes and opens[0] is not None and opens[0] != 0 else 0,
         }
 
         # End-of-week indicators
@@ -281,16 +318,17 @@ class ContextCompressor:
             return None
 
         # Count by sentiment (now safe - all items are dicts)
-        positive = sum(1 for n in valid_news if n.get('sentiment_score', 0) > 0.1)
-        negative = sum(1 for n in valid_news if n.get('sentiment_score', 0) < -0.1)
+        positive = sum(1 for n in valid_news if n.get('sentiment_score') is not None and n.get('sentiment_score') > 0.1)
+        negative = sum(1 for n in valid_news if n.get('sentiment_score') is not None and n.get('sentiment_score') < -0.1)
         neutral = len(valid_news) - positive - negative
 
         # Calculate average sentiment
-        sentiments = [n.get('sentiment_score', 0) for n in valid_news]
+        sentiments = [n.get('sentiment_score') for n in valid_news if n.get('sentiment_score') is not None]
         avg_sentiment = mean(sentiments) if sentiments else 0
 
         # Find most significant headline (highest absolute sentiment)
-        top_headline = max(valid_news, key=lambda n: abs(n.get('sentiment_score', 0))) if valid_news else None
+        news_with_sentiment = [n for n in valid_news if n.get('sentiment_score') is not None]
+        top_headline = max(news_with_sentiment, key=lambda n: abs(n.get('sentiment_score', 0))) if news_with_sentiment else None
 
         summary = {
             'total_articles': len(valid_news),
@@ -324,8 +362,9 @@ class ContextCompressor:
         summary_items = []
 
         if buys:
-            total_shares = sum(t.get('shares', 0) for t in buys)
-            avg_price = mean(t.get('price', 0) for t in buys if t.get('price'))
+            total_shares = sum(t.get('shares', 0) for t in buys if t.get('shares') is not None)
+            valid_prices = [t.get('price', 0) for t in buys if t.get('price') is not None]
+            avg_price = mean(valid_prices) if valid_prices else 0
             summary_items.append({
                 'type': 'BUY_SUMMARY',
                 'transaction_count': len(buys),
@@ -334,8 +373,9 @@ class ContextCompressor:
             })
 
         if sells:
-            total_shares = sum(t.get('shares', 0) for t in sells)
-            avg_price = mean(t.get('price', 0) for t in sells if t.get('price'))
+            total_shares = sum(t.get('shares', 0) for t in sells if t.get('shares') is not None)
+            valid_prices = [t.get('price', 0) for t in sells if t.get('price') is not None]
+            avg_price = mean(valid_prices) if valid_prices else 0
             summary_items.append({
                 'type': 'SELL_SUMMARY',
                 'transaction_count': len(sells),
@@ -371,20 +411,24 @@ class ContextCompressor:
         if len(all_prices) < 2:
             return None
 
-        # Calculate returns
-        for i in range(1, len(all_prices)):
-            ret = (all_prices[i] - all_prices[i-1]) / all_prices[i-1] * 100
+        # Calculate returns - filter out None values
+        valid_prices = [p for p in all_prices if p is not None]
+        if len(valid_prices) < 2:
+            return None
+
+        for i in range(1, len(valid_prices)):
+            ret = (valid_prices[i] - valid_prices[i-1]) / valid_prices[i-1] * 100
             all_returns.append(ret)
 
         # Calculate key metrics
-        price_range_low = min(all_prices)
-        price_range_high = max(all_prices)
+        price_range_low = min(valid_prices)
+        price_range_high = max(valid_prices)
         price_range_pct = (price_range_high - price_range_low) / price_range_low * 100
 
         avg_return = mean(all_returns) if all_returns else 0
         volatility = stdev(all_returns) if len(all_returns) > 1 else 0
 
-        total_return = (all_prices[-1] - all_prices[0]) / all_prices[0] * 100
+        total_return = (valid_prices[-1] - valid_prices[0]) / valid_prices[0] * 100
 
         insights = {
             'date': historical_data[-1]['date'],

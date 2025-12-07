@@ -748,17 +748,17 @@ class DataOrchestrator:
             "high": float(technical.high),
             "low": float(technical.low),
             "close": float(technical.close),
-            "adjusted_close": float(technical.adjusted_close) if technical.adjusted_close else None,
+            "adjusted_close": float(technical.adjusted_close) if technical.adjusted_close is not None else None,
             "volume": technical.volume,
             # Technical Indicators
-            "sma_20": float(technical.sma_20) if technical.sma_20 else None,
-            "sma_50": float(technical.sma_50) if technical.sma_50 else None,
-            "ema_20": float(technical.ema_20) if technical.ema_20 else None,
-            "rsi_14": float(technical.rsi_14) if technical.rsi_14 else None,
-            "macd": float(technical.macd) if technical.macd else None,
-            "macd_signal": float(technical.macd_signal) if technical.macd_signal else None,
-            "bollinger_upper": float(technical.bollinger_upper) if technical.bollinger_upper else None,
-            "bollinger_lower": float(technical.bollinger_lower) if technical.bollinger_lower else None,
+            "sma_20": float(technical.sma_20) if technical.sma_20 is not None else None,
+            "sma_50": float(technical.sma_50) if technical.sma_50 is not None else None,
+            "ema_20": float(technical.ema_20) if technical.ema_20 is not None else None,
+            "rsi_14": float(technical.rsi_14) if technical.rsi_14 is not None else None,
+            "macd": float(technical.macd) if technical.macd is not None else None,
+            "macd_signal": float(technical.macd_signal) if technical.macd_signal is not None else None,
+            "bollinger_upper": float(technical.bollinger_upper) if technical.bollinger_upper is not None else None,
+            "bollinger_lower": float(technical.bollinger_lower) if technical.bollinger_lower is not None else None,
         }
     
     def _serialize_fundamentals(self, fundamentals) -> Dict[str, Any]:
@@ -767,8 +767,8 @@ class DataOrchestrator:
             "report_date": fundamentals.report_date,
             "filing_date": fundamentals.filing_date,
             "market_cap": fundamentals.market_cap,
-            "pe_ratio": float(fundamentals.pe_ratio) if fundamentals.pe_ratio else None,
-            "eps": float(fundamentals.eps) if fundamentals.eps else None,
+            "pe_ratio": float(fundamentals.pe_ratio) if fundamentals.pe_ratio is not None else None,
+            "eps": float(fundamentals.eps) if fundamentals.eps is not None else None,
             "revenue": fundamentals.revenue,
             "net_income": fundamentals.net_income,
             "operating_income": fundamentals.operating_income,
@@ -777,8 +777,8 @@ class DataOrchestrator:
             "stockholder_equity": fundamentals.stockholder_equity,
             "total_debt": fundamentals.total_debt,
             "cash_and_equivalents": fundamentals.cash_and_equivalents,
-            "revenue_qoq_change": float(fundamentals.revenue_qoq_pct) if fundamentals.revenue_qoq_pct else None,
-            "revenue_yoy_change": float(fundamentals.revenue_yoy_pct) if fundamentals.revenue_yoy_pct else None,
+            "revenue_qoq_change": float(fundamentals.revenue_qoq_pct) if fundamentals.revenue_qoq_pct is not None else None,
+            "revenue_yoy_change": float(fundamentals.revenue_yoy_pct) if fundamentals.revenue_yoy_pct is not None else None,
         }
     
     def _serialize_news(self, news, include_full_content: bool = False) -> Dict[str, Any]:
@@ -824,7 +824,7 @@ class DataOrchestrator:
         return [
             {
                 "date": f.date,
-                "sentiment_7day_avg": float(f.sentiment_7day_avg) if f.sentiment_7day_avg else 0.0,
+                "sentiment_7day_avg": float(f.sentiment_7day_avg) if f.sentiment_7day_avg is not None else 0.0,
                 "sentiment_7day_count": f.sentiment_7day_count,
                 "daily_article_count": f.daily_article_count
             }
@@ -849,8 +849,10 @@ class DataOrchestrator:
         neutral = sum(1 for n in news_list if n.sentiment_label == "neutral")
 
         # Calculate averages
-        avg_sentiment = sum(float(n.sentiment_score) for n in news_list if n.sentiment_score) / len(news_list)
-        avg_confidence = sum(float(n.sentiment_confidence or 0.5) for n in news_list) / len(news_list)
+        valid_sentiments = [float(n.sentiment_score) for n in news_list if n.sentiment_score is not None]
+        avg_sentiment = sum(valid_sentiments) / len(valid_sentiments) if valid_sentiments else 0
+        valid_confidences = [float(n.sentiment_confidence or 0.5) for n in news_list if n.sentiment_confidence is not None]
+        avg_confidence = sum(valid_confidences) / len(valid_confidences) if valid_confidences else 0.5
 
         # Determine trend from features
         trend_direction = "neutral"
@@ -873,7 +875,7 @@ class DataOrchestrator:
             "avg_confidence": round(avg_confidence, 3),
             "trend_direction": trend_direction,
             "recent_sentiment": float(sentiment_features[0].sentiment_7day_avg or 0) if sentiment_features else 0.0,
-            "articles_last_7_days": sum(f.daily_article_count for f in sentiment_features) if sentiment_features else 0
+            "articles_last_7_days": sum(f.daily_article_count for f in sentiment_features if f.daily_article_count is not None) if sentiment_features else 0
         }
 
     def _serialize_macro_features(self, macro) -> Dict[str, Any]:

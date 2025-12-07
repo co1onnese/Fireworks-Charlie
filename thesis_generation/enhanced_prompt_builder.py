@@ -331,22 +331,32 @@ Focus on generating the most comprehensive and actionable investment thesis poss
         sections.append("**Daily Price Action:**")
         for day_data in data[-5:]:  # Last 5 days
             if day_data.get('technical'):
-                for tech in day_data['technical']:
-                    sections.append(f"  {tech['date']}: O=${tech['open']:.2f} H=${tech['high']:.2f} L=${tech['low']:.2f} C=${tech['close']:.2f} V={tech['volume']:,}")
-                    
-                    # Technical indicators
-                    indicators = []
-                    if tech.get('sma_20'): indicators.append(f"SMA20: ${tech['sma_20']:.2f}")
-                    if tech.get('sma_50'): indicators.append(f"SMA50: ${tech['sma_50']:.2f}")
-                    if tech.get('ema_20'): indicators.append(f"EMA20: ${tech['ema_20']:.2f}")
-                    if tech.get('rsi_14'): indicators.append(f"RSI: {tech['rsi_14']:.1f}")
-                    if tech.get('macd'): indicators.append(f"MACD: {tech['macd']:.4f}")
-                    if tech.get('macd_signal'): indicators.append(f"Signal: {tech['macd_signal']:.4f}")
-                    if tech.get('bollinger_upper'): indicators.append(f"BB Upper: ${tech['bollinger_upper']:.2f}")
-                    if tech.get('bollinger_lower'): indicators.append(f"BB Lower: ${tech['bollinger_lower']:.2f}")
-                    
-                    if indicators:
-                        sections.append(f"    Indicators: {' | '.join(indicators)}")
+                # Handle both list and dictionary formats for technical data
+                tech_data_list = day_data['technical']
+                if isinstance(tech_data_list, dict):
+                    tech_data_list = [tech_data_list]
+
+                for tech in tech_data_list:
+                    # Add date if not present
+                    if 'date' not in tech and 'date' in day_data:
+                        tech['date'] = day_data['date']
+
+                    if 'date' in tech:
+                        sections.append(f"  {tech['date']}: O=${tech['open']:.2f} H=${tech['high']:.2f} L=${tech['low']:.2f} C=${tech['close']:.2f} V={tech['volume']:,}")
+
+                        # Technical indicators
+                        indicators = []
+                        if tech.get('sma_20'): indicators.append(f"SMA20: ${tech['sma_20']:.2f}")
+                        if tech.get('sma_50'): indicators.append(f"SMA50: ${tech['sma_50']:.2f}")
+                        if tech.get('ema_20'): indicators.append(f"EMA20: ${tech['ema_20']:.2f}")
+                        if tech.get('rsi_14'): indicators.append(f"RSI: {tech['rsi_14']:.1f}")
+                        if tech.get('macd'): indicators.append(f"MACD: {tech['macd']:.4f}")
+                        if tech.get('macd_signal'): indicators.append(f"Signal: {tech['macd_signal']:.4f}")
+                        if tech.get('bollinger_upper'): indicators.append(f"BB Upper: ${tech['bollinger_upper']:.2f}")
+                        if tech.get('bollinger_lower'): indicators.append(f"BB Lower: ${tech['bollinger_lower']:.2f}")
+
+                        if indicators:
+                            sections.append(f"    Indicators: {' | '.join(indicators)}")
         
         return sections
     
@@ -454,7 +464,7 @@ Focus on generating the most comprehensive and actionable investment thesis poss
             label = article_data['sentiment_label']
             
             # Determine emoji based on sentiment
-            emoji = "📈" if sentiment_score > 0.1 else "📉" if sentiment_score < -0.1 else "➡️"
+            emoji = "📈" if sentiment_score is not None and sentiment_score > 0.1 else "📉" if sentiment_score is not None and sentiment_score < -0.1 else "➡️"
             
             # Format published date if available
             pub_date_str = ""

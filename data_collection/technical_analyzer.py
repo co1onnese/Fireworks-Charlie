@@ -63,17 +63,24 @@ class TechnicalAnalyzer:
             # Data is in the format from enhanced prompt builder
             technical_data = []
             for day_data in data:
-                if day_data.get('technical'):
-                    technical_data.extend(day_data['technical'])
-            
+                if day_data.get('technical') and day_data.get('date'):
+                    # Add date to technical data
+                    tech_with_date = day_data['technical'].copy()
+                    tech_with_date['date'] = day_data['date']
+                    technical_data.append(tech_with_date)
+
             if not technical_data:
                 return "No technical data available"
-            
+
             df = pd.DataFrame(technical_data)
         else:
             # Data is already technical data
             df = pd.DataFrame(data)
-        
+
+        # Check if date column exists
+        if 'date' not in df.columns:
+            return "No date information available in technical data"
+
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values('date')
         

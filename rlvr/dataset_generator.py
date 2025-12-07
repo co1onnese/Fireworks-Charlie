@@ -201,7 +201,7 @@ class RLVRDatasetGenerator:
             List of thesis generation records
         """
         query = text("""
-            SELECT 
+            SELECT
                 tg.thesis_id,
                 tg.ticker_id,
                 t.symbol,
@@ -213,7 +213,7 @@ class RLVRDatasetGenerator:
             FROM thesis_generations tg
             JOIN tickers t ON tg.ticker_id = t.ticker_id
             WHERE tg.assistant_response IS NOT NULL
-              AND tg.assistant_response::text NOT LIKE '%"cleared":true%'
+              AND NOT (tg.assistant_response::jsonb ? 'cleared' AND tg.assistant_response->>'cleared' = 'true')
         """)
         
         params = {}

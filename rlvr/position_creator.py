@@ -10,7 +10,7 @@ Date: 2025-10-30
 
 import logging
 from typing import Optional, Dict, Any
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,45 @@ class PositionCreator:
 
         logger.debug(f"Initialized PositionCreator with {hold_days}-day hold")
 
+    def _has_sufficient_future_data(self, ticker_id: int, entry_date: date) -> bool:
+        """
+        Check if we have enough future market data for position calculation.
+
+        Args:
+            ticker_id: The ticker ID
+            entry_date: Position entry date
+
+        Returns:
+            True if sufficient future data exists, False otherwise
+        """
+        try:
+            # Get latest market data date
+            result = self.db_session.execute(
+                text("SELECT MAX(date) FROM market_data")
+            ).fetchone()
+
+            if not result or not result[0]:
+                logger.debug("No market data found - cannot create position")
+                return False
+
+            latest_market_date = result[0]
+            required_end_date = entry_date + timedelta(days=self.hold_days)
+
+            has_sufficient_data = required_end_date <= latest_market_date
+
+            if not has_sufficient_data:
+                logger.debug(
+                    f"Insufficient future data for position: "
+                    f"entry_date={entry_date}, required_end_date={required_end_date}, "
+                    f"latest_market_date={latest_market_date}"
+                )
+
+            return has_sufficient_data
+
+        except Exception as e:
+            logger.error(f"Error checking future data availability: {e}")
+            return False
+
     def create_position_for_thesis(
         self,
         thesis_id: int,
@@ -63,6 +102,16 @@ class PositionCreator:
             Position ID if successful, None otherwise
         """
         try:
+            # Check if we have sufficient future data for position calculation
+            if not self._has_sufficient_future_data(ticker_id, entry_date):
+                logger.debug(
+                    f"Skipping position creation for ticker_id={ticker_id}, "
+                    f"entry_date={entry_date} - insufficient future data"
+                )
+                return None
+
+            logger.debug(f"DEBUG: Position validation passed for ticker_id={ticker_id}, entry_date={entry_date}")
+
             # Get entry price from market_data
             entry_price_query = self.db_session.execute(
                 text("""
@@ -84,6 +133,7 @@ class PositionCreator:
             entry_price = float(entry_price_query.close)
 
             # Calculate position return using database stored procedure
+            logger.debug(f"DEBUG: Calling calculate_position_return for ticker_id={ticker_id}, entry_date={entry_date}")
             result = self.db_session.execute(
                 text("""
                     SELECT * FROM calculate_position_return(
@@ -103,6 +153,8 @@ class PositionCreator:
                 }
             ).fetchone()
 
+            logger.debug(f"DEBUG: Database function result: {result}")
+
             if not result:
                 logger.debug(
                     f"No position return calculated for ticker_id={ticker_id}, "
@@ -111,7 +163,7 @@ class PositionCreator:
                 return None
 
             # Calculate directional accuracy
-            return_pct = float(result.return_pct) if result.return_pct else 0.0
+            return_pct = float(result.return_pct) if result and result.return_pct else 0.0
 
             accuracy_result = self.db_session.execute(
                 text("""
@@ -186,13 +238,13 @@ class PositionCreator:
                     "ticker_id": ticker_id,
                     "entry_date": entry_date,
                     "entry_price": entry_price,
-                    "exit_date": result.exit_date,
-                    "exit_price": float(result.exit_price) if result.exit_price else None,
+                    "exit_date": result.exit_date if result else None,
+                    "exit_price": float(result.exit_price) if result and result.exit_price else None,
                     "predicted_action": predicted_action,
                     "actual_return_pct": return_pct,
-                    "days_held": result.days_held,
-                    "early_exit": result.early_exit,
-                    "early_exit_reason": result.early_exit_reason,
+                    "days_held": result.days_held if result else 0,
+                    "early_exit": result.early_exit if result else False,
+                    "early_exit_reason": result.early_exit_reason if result else None,
                     "directional_accuracy_score": accuracy_score,
                     "met_threshold": met_threshold,
                     "thesis_id": thesis_id,

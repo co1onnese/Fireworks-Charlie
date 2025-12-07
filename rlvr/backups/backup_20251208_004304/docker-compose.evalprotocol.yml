@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  evalprotocol-server:
+    build:
+      context: ..
+      dockerfile: rlvr/Dockerfile.evalprotocol
+    ports:
+      - "8000:8000"
+    environment:
+      # Database Configuration
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/fireworks_charlie
+      - DB_HOST=postgres
+      - DB_NAME=fireworks_charlie
+      - DB_USER=postgres
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - DB_PORT=5432
+
+      # Server Configuration
+      - PYTHONPATH=/app
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - WORKERS=${WORKERS:-4}
+
+      # Fireworks Configuration
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - FIREWORKS_ACCOUNT_ID=${FIREWORKS_ACCOUNT_ID}
+
+      # Performance Configuration
+      - MAX_CONCURRENT_EVALUATIONS=${MAX_CONCURRENT_EVALUATIONS:-10}
+      - EVALUATION_TIMEOUT=${EVALUATION_TIMEOUT:-300}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-30}
+
+      # Security Configuration
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - API_KEY_REQUIRED=${API_KEY_REQUIRED:-false}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ..:/app
+      - ./logs:/app/logs
+    command: python rlvr/run_evalprotocol_server.py --host 0.0.0.0 --port 8000
+    networks:
+      - evalprotocol-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=fireworks_charlie
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database:/docker-entrypoint-initdb.d
+    networks:
+      - evalprotocol-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fireworks_charlie"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - evalprotocol-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+
+  # Optional: Nginx reverse proxy for production
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - evalprotocol-server
+    networks:
+      - evalprotocol-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  evalprotocol-network:
+    driver: bridge

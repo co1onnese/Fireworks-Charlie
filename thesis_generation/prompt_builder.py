@@ -463,20 +463,30 @@ class CumulativePromptBuilder:
         sells = [t for t in all_transactions if t.get("transaction_code") in ["S", "D"]]
         
         if buys:
-            total_buy_amount = sum(t.get("transaction_amount", 0) for t in buys)
+            total_buy_amount = sum(t.get("transaction_amount") or 0 for t in buys)
             section_parts.append(f"  Insider Buys: {len(buys)} transactions, Total: ${total_buy_amount:,}")
-        
+
         if sells:
-            total_sell_amount = sum(t.get("transaction_amount", 0) for t in sells)
+            total_sell_amount = sum(t.get("transaction_amount") or 0 for t in sells)
             section_parts.append(f"  Insider Sells: {len(sells)} transactions, Total: ${total_sell_amount:,}")
         
         # Show recent transactions
         section_parts.append("\nRecent Transactions:")
-        for trans in sorted(all_transactions, key=lambda x: x.get("transaction_date", ""), reverse=True)[:5]:
+        # Sort transactions by date, handling both date objects and strings
+        sorted_transactions = sorted(
+            all_transactions,
+            key=lambda x: (
+                x.get("transaction_date").isoformat()
+                if hasattr(x.get("transaction_date"), 'isoformat')
+                else str(x.get("transaction_date", ""))
+            ) if x.get("transaction_date") else "",
+            reverse=True
+        )[:5]
+        for trans in sorted_transactions:
             trans_type = "Buy" if trans.get("transaction_code") in ["P", "A"] else "Sell"
             section_parts.append(
                 f"  [{trans['transaction_date']}] {trans['owner_name']} - {trans_type} "
-                f"${trans.get('transaction_amount', 0):,} @ ${trans.get('transaction_price', 0):.2f}"
+                f"${trans.get('transaction_amount') or 0:,} @ ${trans.get('transaction_price') or 0:.2f}"
             )
         
         return "\n".join(section_parts)

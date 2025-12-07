@@ -18,7 +18,7 @@ from typing import List, Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestration.config_manager import Config
-from data_collection.database_manager import DatabaseManager, ThesisGeneration, Ticker, TechnicalMarketData, FundamentalData, NewsData
+from data_collection.database_manager import DatabaseManager, ThesisGeneration, Ticker, MarketData, Fundamental, News
 from data_collection.data_orchestrator import DataOrchestrator
 from thesis_generation.enhanced_prompt_builder import EnhancedCumulativePromptBuilder
 from thesis_generation.data_deduplicator import DataDeduplicator
@@ -87,26 +87,26 @@ class OptimizedPromptRegenerator:
             }
 
             # Get technical data
-            technical_data = session.query(TechnicalMarketData).filter(
-                TechnicalMarketData.ticker_id == ticker_id,
-                TechnicalMarketData.date == as_of_date
+            technical_data = session.query(MarketData).filter(
+                MarketData.ticker_id == ticker_id,
+                MarketData.date == as_of_date
             ).first()
 
             if technical_data:
                 data["technical"] = {
-                    "open": technical_data.open_price,
-                    "high": technical_data.high_price,
-                    "low": technical_data.low_price,
-                    "close": technical_data.close_price,
+                    "open": technical_data.open,
+                    "high": technical_data.high,
+                    "low": technical_data.low,
+                    "close": technical_data.close,
                     "volume": technical_data.volume,
                     "adjusted_close": technical_data.adjusted_close
                 }
 
             # Get fundamental data (latest available up to as_of_date)
-            fundamental_data = session.query(FundamentalData).filter(
-                FundamentalData.ticker_id == ticker_id,
-                FundamentalData.filing_date <= as_of_date
-            ).order_by(FundamentalData.filing_date.desc()).first()
+            fundamental_data = session.query(Fundamental).filter(
+                Fundamental.ticker_id == ticker_id,
+                Fundamental.filing_date <= as_of_date
+            ).order_by(Fundamental.filing_date.desc()).first()
 
             if fundamental_data:
                 data["fundamental"] = {
@@ -116,24 +116,25 @@ class OptimizedPromptRegenerator:
                     "eps": fundamental_data.eps,
                     "total_assets": fundamental_data.total_assets,
                     "total_liabilities": fundamental_data.total_liabilities,
-                    "cash_flow_operations": fundamental_data.cash_flow_operations,
+                    "operating_cash_flow": fundamental_data.operating_cash_flow,
                     "pe_ratio": fundamental_data.pe_ratio,
                     "pb_ratio": fundamental_data.pb_ratio
                 }
 
             # Get news data
-            news_data = session.query(NewsData).filter(
-                NewsData.ticker_id == ticker_id,
-                NewsData.published_date == as_of_date
+            news_data = session.query(News).filter(
+                News.ticker_id == ticker_id,
+                News.published_at >= as_of_date,
+                News.published_at < as_of_date + timedelta(days=1)
             ).all()
 
             if news_data:
                 data["news"] = [
                     {
-                        "title": news.title,
+                        "headline": news.headline,
                         "content": news.content,
-                        "sentiment": news.sentiment,
-                        "published_date": news.published_date.isoformat()
+                        "sentiment_score": news.sentiment_score,
+                        "published_at": news.published_at.isoformat()
                     }
                     for news in news_data
                 ]
@@ -233,6 +234,8 @@ class OptimizedPromptRegenerator:
                     as_of_date=as_of_date,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
+                    assistant_response={"cleared": True, "reasoning": "", "action": "hold", "support": ""},
+                    predicted_action="hold",
                     generated_at=datetime.utcnow()
                 )
                 session.add(thesis_gen)
